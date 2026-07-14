@@ -19,6 +19,7 @@ import { Slider } from "@/components/ui/slider";
 import { loadAnalysis, saveAnalysis, savePlan, DEMO_RESULT, type AnalysisResult, type AttachmentZone } from "@/lib/workflow-store";
 import { runAssemblyEngine } from "@/lib/assembly-engine";
 import { ATTACHMENT_METHODS } from "@/lib/mock-data";
+import { supabase } from "@/lib/supabase";
 
 export const Route = createFileRoute("/app/packaging-planner")({
   head: () => ({ meta: [{ title: "Attachment Planner — PackWise AI" }] }),
@@ -345,17 +346,49 @@ function AttachmentPlannerPage() {
 
       // Persist plan for Cost & Sustainability page
       const active = newPlan.filter(z => z.action !== "Remove" && z.recommendedMethod !== "Not needed");
-      savePlan({
+      const totalCostVal = parseFloat(active.reduce((s, z) => s + z.cost, 0).toFixed(2));
+      const avgStabilityVal = active.length > 0 ? Math.round(active.reduce((s, z) => s + z.stability, 0) / active.length) : 100;
+      const avgSustainVal = active.length > 0 ? Math.round(active.reduce((s, z) => s + z.sustainability, 0) / active.length) : 100;
+
+      // Assembly engine for accurate labor time
+      const asmResult = runAssemblyEngine({
+        weightGrams: analysis.product_weight_g ?? 120,
+        accessories: analysis.selected_accessories ?? [],
+        skeletonKeypoints: analysis.raw_keypoints ?? [],
+        poseComplexityScore: analysis.poseComplexityScore ?? 0,
+      });
+
+      const planPayload = {
         zones: newPlan.map(z => ({
           zone: z.zone, currentMethod: z.currentMethod, recommendedMethod: z.recommendedMethod,
           action: z.action, cvDetected: z.cvDetected, xgbRecommended: z.xgbRecommended,
           cost: z.cost, laborMins: z.laborMins, sustainability: z.sustainability,
           stability: z.stability, riskReduction: z.riskReduction,
         })),
-        totalCost: parseFloat(active.reduce((s, z) => s + z.cost, 0).toFixed(2)),
-        avgStability: active.length > 0 ? Math.round(active.reduce((s, z) => s + z.stability, 0) / active.length) : 100,
-        avgSustainability: active.length > 0 ? Math.round(active.reduce((s, z) => s + z.sustainability, 0) / active.length) : 100,
+        totalCost: totalCostVal,
+        avgStability: avgStabilityVal,
+        avgSustainability: avgSustainVal,
         recommendedMaterial,
+      };
+      savePlan(planPayload);
+
+      // Save to Supabase packaging_plan (non-blocking)
+      const user = (() => { try { return JSON.parse(localStorage.getItem("packwise_user") || ""); } catch { return null; } })();
+      supabase.from('packaging_plan').insert([{
+        pe_id: user?.user_id ?? null,
+        title: `${analysis.productName ?? "Doll"} — Packaging Plan`,
+        status: 'draft',
+        zones: planPayload.zones,
+        total_cost: totalCostVal,
+        avg_stability: avgStabilityVal,
+        avg_sustainability: avgSustainVal,
+        recommended_material: recommendedMaterial,
+        assembly_time_seconds: asmResult.assembly_time_seconds,
+        assembly_breakdown: asmResult.calculation_breakdown,
+        is_complex_pose: asmResult.is_complex_pose,
+      }]).then(({ error }) => {
+        if (error) console.warn("[PackWise] packaging_plan save warning:", error.message);
+        else console.log("[PackWise] Packaging plan saved to Supabase ✓");
       });
     }
   }, [xgbData, analysis, threshold]);

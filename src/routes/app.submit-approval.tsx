@@ -8,6 +8,8 @@ import { toast } from "sonner";
 import { useState } from "react";
 import { saveApprovalRequest, loadAnalysis, loadPlan } from "@/lib/workflow-store";
 import { getUser } from "@/lib/auth";
+import { runAssemblyEngine } from "@/lib/assembly-engine";
+import { supabase } from "@/lib/supabase";
 import SubmitPlanContent from "@/components/SubmitPlanContent";
 
 export const Route = createFileRoute("/app/submit-approval")({
@@ -36,7 +38,15 @@ function SubmitApprovalPage() {
     const analysis = loadAnalysis();
     const plan = loadPlan();
 
-    const totalLabor = (plan?.zones || []).reduce((s: number, z: any) => s + (z.laborMins || 0), 0);
+    // Use DFA/MTM assembly engine for accurate labor time (same as Packaging Planner)
+    const assemblyResult = runAssemblyEngine({
+      weightGrams: analysis?.product_weight_g ?? 120,
+      accessories: analysis?.selected_accessories ?? [],
+      skeletonKeypoints: analysis?.raw_keypoints ?? [],
+      poseComplexityScore: analysis?.poseComplexityScore ?? 0,
+    });
+    const assemblyTimeSec = assemblyResult.assembly_time_seconds;
+    const assemblyTimeMins = (assemblyTimeSec / 60).toFixed(2);
     const avgSustain = plan?.avgSustainability ?? 100;
 
     // Build report snapshot to embed in approval request
@@ -47,45 +57,71 @@ function SubmitApprovalPage() {
       ? (sessionStorage.getItem("packwise_annotated_image") || undefined)
       : undefined;
 
+    const reqId = `REQ-${Math.floor(Math.random() * 9000) + 1000}`;
+    const riskLevel = analysis && analysis.movementRiskScore > 60 ? "High"
+      : analysis && analysis.movementRiskScore > 30 ? "Medium" : "Low";
+    const estCost = plan ? `$${plan.totalCost.toFixed(2)}/unit` : "$0.00/unit";
+    const laborTimeStr = `${assemblyTimeSec}s (${assemblyTimeMins} min)`;
+    const submittedDate = new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })
+      + ", " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+    const reportSnapshot = {
+      grade: "B",
+      overallRisk: riskLevel.toUpperCase(),
+      dropSurvival: analysis ? Math.max(0, 100 - analysis.movementRiskScore) : 80,
+      movementRisk: analysis?.movementRiskScore ?? 0,
+      accessoryLoss: analysis?.accessoryLossRisk ?? 0,
+      zones: (plan?.zones || []).map((z: any) => ({
+        zone: z.zone,
+        recommendedMethod: z.recommendedMethod,
+        action: z.action,
+        cost: z.cost || 0,
+        laborMins: z.laborMins || 0,
+        sustainability: z.sustainability || 100,
+      })),
+      finalRecommendation: {
+        packaging: "Eco-friendly Window Box",
+        cushion: "Molded Pulp Insert",
+        attachment: plan?.recommendedMaterial || "Optimized Strapping",
+        support: "Multi-point support",
+        ista: "ISTA 3A Certified",
+      },
+      imageDataUrl,
+      annotatedImageDataUrl,
+      accessories: analysis?.accessories,
+      detectedPoses: analysis?.detectedPoses,
+    };
+
+    // 1. Save to localStorage (for offline/fast access)
     saveApprovalRequest({
-      id: `REQ-${Math.floor(Math.random() * 9000) + 1000}`,
+      id: reqId,
       sku: analysis?.productName || "Custom Plan",
       engineer: user?.name || user?.email || "Packaging Engineer",
-      date: new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })
-        + ", " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      risk: analysis && analysis.movementRiskScore > 60 ? "High"
-        : analysis && analysis.movementRiskScore > 30 ? "Medium" : "Low",
-      cost: plan ? `$${plan.totalCost.toFixed(2)}/unit` : "$0.00/unit",
-      laborTime: `${totalLabor} min`,
+      date: submittedDate,
+      risk: riskLevel,
+      cost: estCost,
+      laborTime: laborTimeStr,
       sustainability: avgSustain,
       status: "Pending",
-      reportSnapshot: {
-        grade: "B",
-        overallRisk: analysis && analysis.movementRiskScore > 60 ? "HIGH"
-          : analysis && analysis.movementRiskScore > 30 ? "MEDIUM" : "LOW",
-        dropSurvival: analysis ? Math.max(0, 100 - analysis.movementRiskScore) : 80,
-        movementRisk: analysis?.movementRiskScore ?? 0,
-        accessoryLoss: analysis?.accessoryLossRisk ?? 0,
-        zones: (plan?.zones || []).map((z: any) => ({
-          zone: z.zone,
-          recommendedMethod: z.recommendedMethod,
-          action: z.action,
-          cost: z.cost || 0,
-          laborMins: z.laborMins || 0,
-          sustainability: z.sustainability || 100,
-        })),
-        finalRecommendation: {
-          packaging: "Eco-friendly Window Box",
-          cushion: "Molded Pulp Insert",
-          attachment: plan?.recommendedMaterial || "Optimized Strapping",
-          support: "Multi-point support",
-          ista: "ISTA 3A Certified",
-        },
-        imageDataUrl,
-        annotatedImageDataUrl,
-        accessories: analysis?.accessories,
-        detectedPoses: analysis?.detectedPoses,
-      },
+      reportSnapshot,
+    });
+
+    // 2. Save to Supabase approval table (non-blocking)
+    supabase.from('approval').insert([{
+      req_id: reqId,
+      sku: analysis?.productName || "Custom Plan",
+      engineer_name: user?.name || user?.email || "Packaging Engineer",
+      pe_id: user?.user_id ?? null,
+      risk_level: riskLevel,
+      est_cost: estCost,
+      labor_time: laborTimeStr,
+      sustainability: avgSustain,
+      status: "Pending",
+      report_snapshot: reportSnapshot,
+      submitted_at: new Date().toISOString(),
+    }]).then(({ error }) => {
+      if (error) console.warn("[PackWise] approval save warning:", error.message);
+      else console.log("[PackWise] Approval request saved to Supabase ✓");
     });
 
     toast.success("Attachment plan successfully submitted to Operations Manager.");

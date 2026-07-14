@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/page-header";
 import { toast } from "sonner";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { saveApprovalRequest, loadAnalysis, loadPlan } from "@/lib/workflow-store";
 import { getUser } from "@/lib/auth";
 import { runAssemblyEngine } from "@/lib/assembly-engine";
@@ -23,6 +23,16 @@ function SubmitApprovalPage() {
   const [isSubmitted, setIsSubmitted] = useState(false);
   const user = getUser();
 
+  // Guard: redirect to Product Analysis if no analysis has been run yet
+  useEffect(() => {
+    const analysisCheck = loadAnalysis();
+    if (!analysisCheck) {
+      toast.error("Please complete Product Analysis before submitting a plan.");
+      navigate({ to: "/app/product-analysis" });
+    }
+  }, []);
+
+  const hasAnalysis = !!loadAnalysis();
   const handleGenerateReport = () => {
     setReportGenerated(true);
     toast.success("Report generated. Please review before submitting to manager.");
@@ -129,6 +139,8 @@ function SubmitApprovalPage() {
       navigate({ to: "/app/dashboard" });
     }, 2000);
   };
+
+  if (!hasAnalysis) return null;
 
   return (
     <div className="space-y-6">

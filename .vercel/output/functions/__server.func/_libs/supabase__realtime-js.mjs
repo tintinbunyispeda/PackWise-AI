@@ -94,7 +94,7 @@ var WebSocketFactory = class {
 };
 //#endregion
 //#region node_modules/@supabase/realtime-js/dist/module/lib/constants.js
-var DEFAULT_VERSION = `realtime-js/2.110.2`;
+var DEFAULT_VERSION = `realtime-js/2.110.3`;
 var VSN_1_0_0 = "1.0.0";
 var VSN_2_0_0 = "2.0.0";
 var DEFAULT_VSN = VSN_2_0_0;
@@ -1020,6 +1020,11 @@ var RealtimeChannel = class RealtimeChannel {
 	/**
 	* Sends the supplied payload to the presence tracker so other subscribers can see that this
 	* client is online. Use `untrack` to stop broadcasting presence for the same key.
+	*
+	* Tracking makes this client visible to other subscribers immediately, regardless of this
+	* channel's `config.presence.enabled` setting or whether it has a `presence` listener — that
+	* flag only affects whether *this* client receives presence updates from others (and, on
+	* RLS-protected channels, whether it's authorized to do so).
 	*
 	* @category Realtime
 	*/

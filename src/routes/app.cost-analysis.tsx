@@ -16,7 +16,8 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { PageHeader } from "@/components/page-header";
-import { loadAnalysis, loadPlan, DEMO_RESULT, type PlanResult, type PlanZoneRow } from "@/lib/workflow-store";
+import { loadAnalysis, loadPlan, type PlanResult, type PlanZoneRow } from "@/lib/workflow-store";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/app/cost-analysis")({
   head: () => ({ meta: [{ title: "Cost & Sustainability — PackWise AI" }] }),
@@ -72,15 +73,29 @@ function WorkflowBar() {
 
 function CostSustainabilityPage() {
   const navigate = useNavigate();
-  const [productName, setProductName] = useState("Glamour Doll – Sparkle Edition");
+  const [productName, setProductName] = useState("");
   const [plan, setPlan] = useState<PlanResult | null>(null);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const analysis = loadAnalysis() ?? DEMO_RESULT;
+    const analysis = loadAnalysis();
+    if (!analysis) {
+      toast.error("Please complete Product Analysis first.");
+      navigate({ to: "/app/product-analysis" });
+      return;
+    }
     setProductName(analysis.productName);
     const p = loadPlan();
+    if (!p) {
+      toast.error("Please run the Packaging Planner before viewing Cost Analysis.");
+      navigate({ to: "/app/packaging-planner" });
+      return;
+    }
     setPlan(p);
+    setReady(true);
   }, []);
+
+  if (!ready) return null;
 
   // Compute derived data from plan
   const activeZones = plan?.zones.filter(z => z.action !== "Remove") ?? [];

@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect } from "react";
+import { toast } from "sonner";
 import { loadAnalysis, loadPlan } from "@/lib/workflow-store";
 import { Link } from "@tanstack/react-router";
 import { getToken } from "@/lib/auth";
@@ -17,6 +18,7 @@ import {
   Cpu,
   Database,
   Download,
+  Loader2,
   FileJson,
   FileText,
   GitBranch,
@@ -453,7 +455,7 @@ function ProductPhotoSection({
   imageDataUrl?: string | null;
   annotatedImageDataUrl?: string | null;
   productName: string;
-  accessories: string[];
+  accessories?: string[];
   detectedPoses?: string[];
   computedHeight?: string;
   computedComplexity?: string;
@@ -501,7 +503,7 @@ function ProductPhotoSection({
           <KV label="Computed Height" value={computedHeight || "—"} />
           <KV label="Complexity" value={computedComplexity || "—"} />
           <KV label="Center of Gravity" value={computedCOG || "—"} />
-          <KV label="Accessories Detected" value={accessories.length > 0 ? accessories.join(", ") : "None"} />
+          <KV label="Accessories Detected" value={accessories && accessories.length > 0 ? accessories.join(", ") : "None"} />
         </div>
       </CardContent>
     </Card>
@@ -560,12 +562,14 @@ function ExportCenter({
   onExportCsv,
   onPrint,
   onShare,
+  isExporting,
 }: {
   onExportPdf: () => void;
   onExportJson: () => void;
   onExportCsv: () => void;
   onPrint: () => void;
   onShare: () => void;
+  isExporting?: boolean;
 }) {
   return (
     <Card className="border-border/70 shadow-none">
@@ -574,11 +578,12 @@ function ExportCenter({
         <div className="flex flex-col md:flex-row md:items-center gap-3">
           <Button
             onClick={onExportPdf}
+            disabled={isExporting}
             size="lg"
             className="bg-[#d946ef] hover:bg-[#d946ef]/90 text-white flex-1 md:flex-none md:min-w-[280px]"
           >
-            <FileText className="h-4 w-4 mr-2" />
-            Download Engineering Report (PDF)
+            {isExporting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileText className="h-4 w-4 mr-2" />}
+            {isExporting ? "Generating PDF..." : "Download Engineering Report (PDF)"}
           </Button>
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={onExportJson}>
@@ -640,9 +645,10 @@ export default function SubmitPlanContent() {
   const [apiData, setApiData] = useState<any>(null);
   const [analysis, setAnalysis] = useState<any>(null);
   const [plan, setPlan] = useState<any>(null);
+  const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
-    const a = loadAnalysis() || { productName: "Mock Doll", product_weight_g: 120, height_cm: 29.0, center_of_gravity: "Center", accessory_count: 1, accessory_weight_g: 15.0, poseComplexityScore: 50, poseStabilityScore: 50 };
+    const a = loadAnalysis() || { productName: "Mock Doll", product_weight_g: 120, height_cm: 29.0, center_of_gravity: "Center", accessory_count: 1, accessory_weight_g: 15.0, poseComplexityScore: 50, poseStabilityScore: 50, accessories: [] };
     const p = loadPlan() || { totalCost: 0, avgSustainability: 100, recommendedMaterial: "Standard", zones: [] };
     setAnalysis(a);
     setPlan(p);
@@ -777,7 +783,6 @@ export default function SubmitPlanContent() {
   const metadata = {
     generatedAt: new Date().toLocaleString(),
     runId: `PW-RUN-${Math.floor(Math.random()*9000)+1000}`,
-    modelVersion: "PackWise-Predictor v2.5",
     ruleEngineVersion: "Rule Engine v2.5",
     knowledgeBaseVersion: "KB v19.1",
     literaturePapers: 24,
@@ -785,10 +790,7 @@ export default function SubmitPlanContent() {
     confidence: summary.confidence,
   };
 
-  const payload = useMemo(
-    () => ({ summary, config, metrics, findings, rules, optimization, trace, finalRecommendation, metadata, notes }),
-    [summary, config, metrics, findings, rules, optimization, trace, finalRecommendation, metadata, notes],
-  );
+  const payload = { summary, config, metrics, findings, rules, optimization, trace, finalRecommendation, metadata, notes };
 
   const download = (data: string, filename: string, mime: string) => {
     const blob = new Blob([data], { type: mime });
@@ -801,194 +803,196 @@ export default function SubmitPlanContent() {
   };
 
   const onExportPdf = () => {
-    const imageUrl = analysis?.imageDataUrl || analysis?.annotatedImageDataUrl || "";
-    const annotatedUrl = analysis?.annotatedImageDataUrl || "";
-    const zonesHtml = (plan?.zones || []).map((z: any) => `
-      <tr>
-        <td>${z.zone}</td>
-        <td>${z.recommendedMethod}</td>
-        <td>${z.action}</td>
-        <td>$${Number(z.cost || 0).toFixed(2)}</td>
-        <td>${z.laborMins || 0} min</td>
-        <td>${z.sustainability || 0}%</td>
-      </tr>`).join("");
-    const rulesHtml = rules.map((r) => `
-      <tr>
-        <td>${r.id}</td>
-        <td>${r.rule}</td>
-        <td class="severity-${r.severity.toLowerCase()}">${r.severity}</td>
-        <td>${r.recommendation}</td>
-      </tr>`).join("");
-    const html = `<!DOCTYPE html>
+    if (isExporting) return;
+    setIsExporting(true);
+
+    const imageUrl = (typeof sessionStorage !== "undefined" ? sessionStorage.getItem("packwise_image") : null) || "";
+    const annotatedUrl = (typeof sessionStorage !== "undefined" ? sessionStorage.getItem("packwise_annotated_image") : null) || "";
+    const totalLabor = (plan?.zones || []).reduce((s: number, z: any) => s + (z.laborMins || 0), 0);
+
+    const zonesHtml = (plan?.zones || []).map((z: any) => `<tr><td><strong>${z.zone}</strong></td><td>${z.recommendedMethod}</td><td>${z.action}</td><td>$${Number(z.cost || 0).toFixed(2)}</td><td>${z.laborMins || 0} min</td><td>${z.sustainability || 0}%</td></tr>`).join("");
+    const rulesHtml = rules.map((r) => `<tr><td><strong>${r.id}</strong></td><td>${r.rule}</td><td>${r.severity}</td><td>${r.recommendation}</td></tr>`).join("");
+
+    const showOriginal = !!imageUrl;
+    const showAnnotated = !!annotatedUrl && annotatedUrl !== imageUrl;
+
+    const fullHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <title>PackWise AI — Engineering Report ${metadata.runId}</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'Segoe UI', Arial, sans-serif; color: #1a1a2e; background: #fff; font-size: 11px; }
-  .page { max-width: 900px; margin: 0 auto; padding: 32px; }
-  .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #d946ef; padding-bottom: 16px; margin-bottom: 24px; }
-  .header-left h1 { font-size: 22px; font-weight: 700; color: #d946ef; }
-  .header-left p { font-size: 11px; color: #666; margin-top: 4px; }
-  .header-right { text-align: right; font-size: 10px; color: #888; }
-  .badge { display: inline-block; padding: 2px 10px; border-radius: 99px; font-size: 10px; font-weight: 700; }
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap');
+  @page { margin: 15mm 18mm; size: A4; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter','Segoe UI',sans-serif; color: #1e293b; background: #fff; font-size: 11px; line-height: 1.5; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  .page { padding: 0; }
+  .header { display: flex; justify-content: space-between; align-items: flex-end; padding-bottom: 16px; border-bottom: 3px solid #ec4899; margin-bottom: 24px; }
+  .header h1 { font-size: 20px; font-weight: 900; color: #0f172a; letter-spacing: -0.5px; }
+  .header p  { font-size: 11px; color: #64748b; margin-top: 3px; }
+  .header-meta { text-align: right; font-size: 10px; color: #94a3b8; line-height: 1.8; font-family: monospace; }
+
+  .dash { display: grid; grid-template-columns: 150px 1fr; gap: 16px; margin-bottom: 24px; }
+  .grade-card { background: linear-gradient(135deg,#fdf2f8,#fce7f3); border: 1px solid #fbcfe8; border-radius: 12px; padding: 18px; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
+  .grade-letter { font-size: 50px; font-weight: 900; color: #ec4899; line-height: 1; }
+  .grade-sub { font-size: 10px; font-weight: 700; color: #64748b; }
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 99px; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
   .badge-low { background: #d1fae5; color: #065f46; }
   .badge-medium { background: #fef3c7; color: #92400e; }
   .badge-high { background: #fee2e2; color: #991b1b; }
-  .grade-box { display: inline-flex; align-items: center; justify-content: center; width: 72px; height: 72px; border-radius: 16px; border: 2px solid #d946ef; font-size: 32px; font-weight: 700; color: #d946ef; margin-right: 16px; }
-  .section { margin-bottom: 28px; }
-  .section-title { font-size: 13px; font-weight: 700; color: #d946ef; text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 1px solid #f3e8ff; padding-bottom: 6px; margin-bottom: 12px; }
-  .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; }
-  .metric-card { background: #faf5ff; border: 1px solid #e9d5ff; border-radius: 10px; padding: 10px 12px; }
-  .metric-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; color: #9333ea; font-weight: 600; }
-  .metric-value { font-size: 20px; font-weight: 700; color: #1a1a2e; margin-top: 2px; }
-  .metric-unit { font-size: 10px; color: #888; }
-  .kv-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-  .kv-item { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 10px; }
-  .kv-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em; color: #9ca3af; font-weight: 600; }
-  .kv-value { font-size: 11px; font-weight: 600; color: #111827; margin-top: 2px; }
-  .photo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 12px; }
-  .photo-box { border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; background: #f9fafb; display: flex; flex-direction: column; }
-  .photo-box-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; color: #9ca3af; font-weight: 600; padding: 8px 10px; border-bottom: 1px solid #e5e7eb; }
-  .photo-box img { width: 100%; height: 260px; object-fit: contain; background: #fff; }
-  table { width: 100%; border-collapse: collapse; font-size: 10px; }
-  th { background: #faf5ff; color: #7c3aed; font-weight: 600; font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em; padding: 7px 10px; text-align: left; border-bottom: 1px solid #e9d5ff; }
-  td { padding: 6px 10px; border-bottom: 1px solid #f3f4f6; color: #374151; vertical-align: top; }
+
+  .metrics { display: grid; grid-template-columns: repeat(2,1fr); gap: 10px; }
+  .mc { background: #fdf2f8; border: 1px solid #fbcfe8; border-radius: 8px; padding: 11px 14px; }
+  .mc-lbl { font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; color: #be185d; font-weight: 700; margin-bottom: 3px; }
+  .mc-val { font-size: 20px; font-weight: 900; color: #0f172a; }
+  .mc-unit { font-size: 11px; color: #94a3b8; font-weight: 500; }
+
+  .section { margin-bottom: 24px; page-break-inside: avoid; }
+  .stitle { font-size: 9px; font-weight: 900; color: #ec4899; text-transform: uppercase; letter-spacing: 0.14em; padding-bottom: 5px; border-bottom: 1px solid #fbcfe8; margin-bottom: 12px; }
+
+  .kv { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; }
+  .ki { padding: 8px 10px; background: #f8fafc; border: 1px solid #f1f5f9; border-radius: 6px; }
+  .ki-lbl { font-size: 8px; text-transform: uppercase; letter-spacing: 0.07em; color: #94a3b8; font-weight: 700; margin-bottom: 2px; }
+  .ki-val { font-size: 11px; font-weight: 600; color: #0f172a; }
+
+  .photo-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 12px; }
+  .photo-box { border: 1px solid #fbcfe8; border-radius: 8px; overflow: hidden; }
+  .photo-lbl { font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; color: #be185d; font-weight: 700; padding: 7px 11px; border-bottom: 1px solid #fbcfe8; background: #fdf2f8; }
+  .photo-box img { width: 100%; height: 190px; object-fit: contain; display: block; background: #fff; }
+
+  table { width: 100%; border-collapse: collapse; }
+  th { background: #fdf2f8; color: #be185d; font-weight: 700; font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; padding: 8px 10px; text-align: left; border-bottom: 2px solid #fbcfe8; }
+  td { padding: 8px 10px; border-bottom: 1px solid #fdf2f8; color: #334155; vertical-align: top; font-size: 11px; }
   tr:last-child td { border-bottom: none; }
-  .severity-high { color: #991b1b; font-weight: 700; }
-  .severity-medium { color: #92400e; font-weight: 700; }
-  .severity-low { color: #065f46; font-weight: 700; }
-  .rec-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-  .rec-item { background: #fdf4ff; border: 1px solid #f0abfc; border-radius: 10px; padding: 10px 12px; }
-  .rec-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; color: #a21caf; font-weight: 600; }
-  .rec-value { font-size: 11px; font-weight: 600; color: #581c87; margin-top: 3px; }
-  .footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-between; font-size: 9px; color: #9ca3af; }
-  .exec-top { display: flex; align-items: center; margin-bottom: 16px; }
-  @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+
+  .rec { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; background: #fdf2f8; padding: 14px; border-radius: 10px; border: 1px solid #fbcfe8; }
+  .ri-lbl { font-size: 8px; text-transform: uppercase; letter-spacing: 0.08em; color: #be185d; font-weight: 700; margin-bottom: 3px; }
+  .ri-val { font-size: 12px; font-weight: 800; color: #831843; }
+
+  .footer { margin-top: 28px; padding-top: 14px; border-top: 1px solid #fbcfe8; display: flex; justify-content: space-between; font-size: 9px; color: #94a3b8; }
 </style>
 </head>
 <body>
 <div class="page">
   <div class="header">
-    <div class="header-left">
-      <h1>📦 PackWise AI — Engineering Report</h1>
-      <p>${config.productName} &nbsp;·&nbsp; Run ID: ${metadata.runId} &nbsp;·&nbsp; ${metadata.generatedAt}</p>
+    <div>
+      <h1>PackWise AI &mdash; Engineering Report</h1>
+      <p>${config.productName} &nbsp;&middot;&nbsp; ${metadata.generatedAt}</p>
     </div>
-    <div class="header-right">
-      <div>${metadata.modelVersion}</div>
-      <div>${metadata.ruleEngineVersion}</div>
-      <div>${metadata.knowledgeBaseVersion}</div>
+    <div class="header-meta">
+      <div>RUN ID: ${metadata.runId}</div>
     </div>
   </div>
 
-  <!-- Executive Summary -->
-  <div class="section">
-    <div class="section-title">Executive Summary</div>
-    <div class="exec-top">
-      <div class="grade-box">${summary.grade}</div>
-      <div>
-        <span class="badge badge-${summary.overallRisk.toLowerCase()}">${summary.overallRisk} RISK</span>
-        <div style="margin-top:6px;font-size:11px;color:#555;">Confidence: ${summary.confidence}% &nbsp;·&nbsp; ${metadata.rulesEvaluated} rules evaluated</div>
-      </div>
+  <div class="dash">
+    <div class="grade-card">
+      <div class="grade-letter">${summary.grade}</div>
+      <div class="grade-sub">AI Readiness Grade</div>
+      <div class="badge badge-${summary.overallRisk.toLowerCase()}">${summary.overallRisk} RISK</div>
     </div>
-    <div class="metrics-grid">
-      <div class="metric-card"><div class="metric-label">Drop Survival</div><div class="metric-value">${summary.dropSurvival}<span class="metric-unit">/100</span></div></div>
-      <div class="metric-card"><div class="metric-label">Movement Risk</div><div class="metric-value">${summary.movementRisk}</div></div>
-      <div class="metric-card"><div class="metric-label">Accessory Loss</div><div class="metric-value">${summary.accessoryLoss}<span class="metric-unit">%</span></div></div>
-      <div class="metric-card"><div class="metric-label">Packaging Cost</div><div class="metric-value" style="font-size:16px;">${summary.packagingCost}</div></div>
-      <div class="metric-card"><div class="metric-label">Sustainability</div><div class="metric-value">${summary.sustainability}<span class="metric-unit">%</span></div></div>
-      <div class="metric-card"><div class="metric-label">Est. Labor Time</div><div class="metric-value" style="font-size:14px;">${(plan?.zones || []).reduce((s: number, z: any) => s + (z.laborMins || 0), 0)} <span class="metric-unit">min</span></div></div>
+    <div class="metrics">
+      <div class="mc"><div class="mc-lbl">Packaging Cost</div><div class="mc-val">${summary.packagingCost}</div></div>
+      <div class="mc"><div class="mc-lbl">Labor Time</div><div class="mc-val">${totalLabor}<span class="mc-unit"> min</span></div></div>
+      <div class="mc"><div class="mc-lbl">Drop Survival</div><div class="mc-val">${summary.dropSurvival}<span class="mc-unit">/100</span></div></div>
+      <div class="mc"><div class="mc-lbl">Sustainability</div><div class="mc-val">${summary.sustainability}<span class="mc-unit">%</span></div></div>
     </div>
   </div>
 
-  <!-- Product Photos -->
-  ${(imageUrl || annotatedUrl) ? `
+  ${(showOriginal || showAnnotated) ? `
   <div class="section">
-    <div class="section-title">Product Detection Image</div>
-    <div class="photo-grid">
-      ${imageUrl ? `<div class="photo-box"><div class="photo-box-label">Original Captured</div><img src="${imageUrl}" alt="Original" /></div>` : ""}
-      ${annotatedUrl ? `<div class="photo-box"><div class="photo-box-label">Annotated — Skeleton &amp; Zones</div><img src="${annotatedUrl}" alt="Annotated" /></div>` : ""}
+    <div class="stitle">Computer Vision Analysis</div>
+    <div class="photo-row">
+      ${showOriginal ? `<div class="photo-box"><div class="photo-lbl">Detected Product Image</div><img src="${imageUrl}" alt="Original"/></div>` : ""}
+      ${showAnnotated ? `<div class="photo-box"><div class="photo-lbl">YOLOv11 Skeleton &amp; Zones</div><img src="${annotatedUrl}" alt="Annotated"/></div>` : ""}
     </div>
-    <div class="kv-grid" style="margin-top:8px;">
-      <div class="kv-item"><div class="kv-label">Detected Pose</div><div class="kv-value">${(analysis?.detectedPoses || []).join(", ") || "—"}</div></div>
-      <div class="kv-item"><div class="kv-label">Computed Height</div><div class="kv-value">${analysis?.computedHeight || config.dimensions}</div></div>
-      <div class="kv-item"><div class="kv-label">Complexity</div><div class="kv-value">${analysis?.computedComplexity || "—"}</div></div>
-      <div class="kv-item"><div class="kv-label">Center of Gravity</div><div class="kv-value">${analysis?.computedCOG || config.centerOfGravity}</div></div>
-      <div class="kv-item"><div class="kv-label">Accessories</div><div class="kv-value">${(analysis?.accessories || []).join(", ") || "None"}</div></div>
-      <div class="kv-item"><div class="kv-label">Body Regions</div><div class="kv-value">${(analysis?.bodyRegions || []).join(", ") || "—"}</div></div>
+    <div class="kv">
+      <div class="ki"><div class="ki-lbl">Detected Pose</div><div class="ki-val">${(analysis?.detectedPoses || []).join(", ") || "—"}</div></div>
+      <div class="ki"><div class="ki-lbl">Complexity</div><div class="ki-val">${analysis?.computedComplexity || "—"}</div></div>
+      <div class="ki"><div class="ki-lbl">Center of Gravity</div><div class="ki-val">${analysis?.computedCOG || config.centerOfGravity}</div></div>
     </div>
   </div>` : ""}
 
-  <!-- Packaging Configuration -->
   <div class="section">
-    <div class="section-title">Packaging Configuration</div>
-    <div class="kv-grid">
-      <div class="kv-item"><div class="kv-label">Packaging Type</div><div class="kv-value">${config.packagingType}</div></div>
-      <div class="kv-item"><div class="kv-label">Attachment Method</div><div class="kv-value">${config.attachmentMethod}</div></div>
-      <div class="kv-item"><div class="kv-label">Cushion Material</div><div class="kv-value">${config.cushionMaterial}</div></div>
-      <div class="kv-item"><div class="kv-label">Cushion Thickness</div><div class="kv-value">${config.cushionThickness}</div></div>
-      <div class="kv-item"><div class="kv-label">ISTA Standard</div><div class="kv-value">${config.istaStandard}</div></div>
-      <div class="kv-item"><div class="kv-label">Support Points</div><div class="kv-value">${config.supportPoints}</div></div>
-      <div class="kv-item"><div class="kv-label">Weight</div><div class="kv-value">${config.weight}</div></div>
-      <div class="kv-item"><div class="kv-label">Center of Gravity</div><div class="kv-value">${config.centerOfGravity}</div></div>
-      <div class="kv-item"><div class="kv-label">Accessories Detected</div><div class="kv-value">${config.accessoriesDetected}</div></div>
+    <div class="stitle">Product Configuration</div>
+    <div class="kv">
+      <div class="ki"><div class="ki-lbl">Packaging Type</div><div class="ki-val">${config.packagingType}</div></div>
+      <div class="ki"><div class="ki-lbl">Attachment Method</div><div class="ki-val">${config.attachmentMethod}</div></div>
+      <div class="ki"><div class="ki-lbl">Cushion Material</div><div class="ki-val">${config.cushionMaterial}</div></div>
+      <div class="ki"><div class="ki-lbl">Weight</div><div class="ki-val">${config.weight}</div></div>
+      <div class="ki"><div class="ki-lbl">Dimensions</div><div class="ki-val">${config.dimensions}</div></div>
+      <div class="ki"><div class="ki-lbl">Accessories</div><div class="ki-val">${config.accessoriesDetected} detected</div></div>
     </div>
   </div>
 
-  <!-- Attachment Zones -->
   ${zonesHtml ? `
-  <div class="section">
-    <div class="section-title">Attachment Zones Plan</div>
-    <table>
-      <thead><tr><th>Zone</th><th>Recommended Method</th><th>Action</th><th>Cost</th><th>Labor</th><th>Sustainability</th></tr></thead>
-      <tbody>${zonesHtml}</tbody>
-    </table>
+  <div class="section" style="page-break-before:always;">
+    <div class="stitle">DFA / MTM Attachment Plan</div>
+    <table><thead><tr><th>Zone</th><th>Method</th><th>Action</th><th>Cost</th><th>Labor</th><th>Eco%</th></tr></thead><tbody>${zonesHtml}</tbody></table>
   </div>` : ""}
 
-  <!-- Triggered Rules -->
   ${rulesHtml ? `
   <div class="section">
-    <div class="section-title">Triggered Engineering Rules</div>
-    <table>
-      <thead><tr><th>Rule ID</th><th>Engineering Rule</th><th>Severity</th><th>Recommendation</th></tr></thead>
-      <tbody>${rulesHtml}</tbody>
-    </table>
+    <div class="stitle">Triggered Engineering Rules</div>
+    <table><thead><tr><th>Rule ID</th><th>Explanation</th><th>Severity</th><th>Recommendation</th></tr></thead><tbody>${rulesHtml}</tbody></table>
   </div>` : ""}
 
-  <!-- Final Recommendation -->
   <div class="section">
-    <div class="section-title">Final Packaging Recommendation</div>
-    <div class="rec-grid">
-      <div class="rec-item"><div class="rec-label">Packaging</div><div class="rec-value">${finalRecommendation.packaging}</div></div>
-      <div class="rec-item"><div class="rec-label">Cushion</div><div class="rec-value">${finalRecommendation.cushion}</div></div>
-      <div class="rec-item"><div class="rec-label">Attachment</div><div class="rec-value">${finalRecommendation.attachment}</div></div>
-      <div class="rec-item"><div class="rec-label">Support</div><div class="rec-value">${finalRecommendation.support}</div></div>
-      <div class="rec-item"><div class="rec-label">ISTA</div><div class="rec-value">${finalRecommendation.ista}</div></div>
-      <div class="rec-item"><div class="rec-label">Deployment Status</div><div class="rec-value" style="color:#d946ef;">✔ ${finalRecommendation.status}</div></div>
+    <div class="stitle">Final Implementation Recommendation</div>
+    <div class="rec">
+      <div><div class="ri-lbl">Packaging</div><div class="ri-val">${finalRecommendation.packaging}</div></div>
+      <div><div class="ri-lbl">Cushion</div><div class="ri-val">${finalRecommendation.cushion}</div></div>
+      <div><div class="ri-lbl">Attachment</div><div class="ri-val">${finalRecommendation.attachment}</div></div>
+      <div><div class="ri-lbl">Support</div><div class="ri-val">${finalRecommendation.support}</div></div>
+      <div><div class="ri-lbl">ISTA Standard</div><div class="ri-val">${finalRecommendation.ista}</div></div>
+      <div><div class="ri-lbl">Status</div><div class="ri-val" style="color:#ec4899;">&#10004; ${finalRecommendation.status}</div></div>
     </div>
   </div>
 
-  <!-- Engineering Notes -->
-  ${notes ? `
-  <div class="section">
-    <div class="section-title">Engineering Notes</div>
-    <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:11px;color:#374151;white-space:pre-wrap;">${notes}</div>
-  </div>` : ""}
-
   <div class="footer">
-    <div>PackWise AI · ${metadata.modelVersion} · ${metadata.ruleEngineVersion} · ${metadata.knowledgeBaseVersion}</div>
-    <div>Run ID: ${metadata.runId} · Confidence: ${metadata.confidence}% · ${metadata.literaturePapers} papers · ${metadata.rulesEvaluated} rules</div>
+    <div>PackWise AI &middot; Powered by YOLOv11 &amp; Expert System KB v19.1</div>
+    <div>Strictly Confidential &middot; Internal Engineering Document</div>
   </div>
 </div>
 </body>
 </html>`;
-    const win = window.open("", "_blank");
-    if (win) {
-      win.document.write(html);
-      win.document.close();
-      setTimeout(() => win.print(), 500);
+
+    // Use hidden iframe — print dialog appears directly, no new page opens
+    const iframe = document.createElement("iframe");
+    iframe.style.cssText = "position:fixed;width:0;height:0;border:0;left:-9999px;top:0;visibility:hidden;";
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow?.document;
+    if (!doc) {
+      document.body.removeChild(iframe);
+      setIsExporting(false);
+      toast.error("Could not initialize PDF print. Try again.");
+      return;
     }
+
+    doc.open();
+    doc.write(fullHtml);
+    doc.close();
+
+    // Give fonts and images time to load before triggering print
+    setTimeout(() => {
+      try {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+      } catch {
+        // fallback: open in new tab if iframe print blocked
+        const blob = new Blob([fullHtml], { type: "text/html;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        window.open(url, "_blank");
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      }
+      setTimeout(() => {
+        if (document.body.contains(iframe)) document.body.removeChild(iframe);
+      }, 1500);
+    }, 1000);
+
+    setIsExporting(false);
+    toast.success("Print dialog opening — choose 'Save as PDF' as destination.");
   };
   const onPrint = () => window.print();
   const onExportJson = () =>
@@ -1051,6 +1055,7 @@ export default function SubmitPlanContent() {
             onExportCsv={onExportCsv}
             onPrint={onPrint}
             onShare={onShare}
+            isExporting={isExporting}
           />
         </div>
         <div className="hidden print:block">

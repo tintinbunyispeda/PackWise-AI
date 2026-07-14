@@ -4,7 +4,7 @@ import { t as RealtimeClient } from "./supabase__realtime-js.mjs";
 import { t as StorageClient } from "./@supabase/storage-js+[...].mjs";
 import { t as AuthClient } from "./supabase__auth-js.mjs";
 //#region node_modules/@supabase/supabase-js/dist/index.mjs
-var version = "2.110.2";
+var version = "2.110.3";
 var JS_ENV = "";
 var JS_RUNTIME_VERSION;
 if (typeof Deno !== "undefined") {
@@ -451,9 +451,9 @@ var SupabaseClient = class {
 	* ```
 	*
 	* @exampleDescription Custom fetch implementation
-	* `supabase-js` uses the [`cross-fetch`](https://www.npmjs.com/package/cross-fetch) library to make HTTP requests,
+	* `supabase-js` uses the runtime's global `fetch` to make HTTP requests,
 	* but an alternative `fetch` implementation can be provided as an option.
-	* This is most useful in environments where `cross-fetch` is not compatible (for instance Cloudflare Workers).
+	* This is useful in environments where the global `fetch` is unavailable or where you want to customize request behavior.
 	*
 	* @example Custom fetch implementation
 	* ```js

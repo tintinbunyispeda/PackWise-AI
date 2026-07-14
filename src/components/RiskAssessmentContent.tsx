@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { Link } from "@tanstack/react-router";
 import { getToken } from "@/lib/auth";
+import { loadAnalysis, loadPlan } from "@/lib/workflow-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -268,25 +269,15 @@ export default function RiskAssessmentContent({
   decisionTrace?: DecisionTraceStep[];
 } = {}) {
   const [product, setProduct] = useState({
-    name: "Glamour Doll — Sparkle Edition",
-    category: "Fashion Doll",
-    complexity: 82,
+    name: "—",
+    category: "—",
+    complexity: 50,
     support: 3,
   });
 
-  const [accessories, setAccessories] = useState<Accessory[]>([
-    { name: "Glasses", secured: false, small: true },
-    { name: "Handbag", secured: true, small: true },
-    { name: "Crown", secured: false, small: true },
-    { name: "Shoes", secured: true, small: true },
-    { name: "Dress Stand", secured: true, small: false },
-  ]);
+  const [accessories, setAccessories] = useState<Accessory[]>([]);
 
-  const [attachments] = useState<Attachment[]>([
-    { region: "Hair", type: "Elastic Strap", coverage: 70 },
-    { region: "Waist", type: "PET Support", coverage: 85 },
-    { region: "Wrist", type: "EVA Strap", coverage: 65 },
-  ]);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
 
   const [scenario, setScenario] = useState<ScenarioKey>("normal");
   const [confOpen, setConfOpen] = useState(false);
@@ -296,39 +287,74 @@ export default function RiskAssessmentContent({
 
   const [apiData, setApiData] = useState<any>(null);
 
+  // Hydrate from real analysis data
   useEffect(() => {
-    async function fetchApi() {
+    const a = loadAnalysis();
+    if (a) {
+      setProduct({
+        name: a.productName ?? "—",
+        category: a.category ?? a.productType ?? "—",
+        complexity: a.poseComplexityScore ?? 50,
+        support: 3,
+      });
+
+      // Map accessories from selected_accessories list
+      const SMALL_ACCESSORIES = new Set(["glasses","crown","ring","earring","clip","pin","badge"]);
+      const accList: Accessory[] = (a.selected_accessories ?? a.accessories ?? []).map((name: string) => ({
+        name,
+        secured: false,
+        small: SMALL_ACCESSORIES.has(name.toLowerCase()),
+      }));
+      if (accList.length > 0) setAccessories(accList);
+
+      // Map attachment zones → Attachment[]
+      const RISK_TO_COVERAGE: Record<string, number> = { high: 50, medium: 70, low: 88 };
+      const METHOD_TO_TYPE: Record<string, string> = {
+        "Elastic Strap": "Elastic Strap",
+        "EVA Strap": "EVA Strap",
+        "PET Support": "PET Support",
+        "Cardboard Support": "Cardboard Support",
+        "Blister Support": "Blister Support",
+      };
+      const zones = (a.attachmentZones ?? []).filter(
+        (z: any) => z.recommendedMethod && z.recommendedMethod !== "No Attachment Required" && z.recommendedMethod !== "Not needed"
+      );
+      if (zones.length > 0) {
+        setAttachments(zones.map((z: any) => ({
+          region: z.zone,
+          type: METHOD_TO_TYPE[z.recommendedMethod] ?? z.recommendedMethod,
+          coverage: RISK_TO_COVERAGE[z.riskLevel] ?? 70,
+        })));
+      }
+
+      // Re-connect the backend AI model
       const token = getToken();
-      if (!token) return;
-      try {
-        const res = await fetch("http://localhost:8000/predict", {
+      if (token) {
+        fetch("http://localhost:8000/predict", {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
           body: JSON.stringify({
             plan_id: 1,
-            product_weight_g: 250,
-            height_cm: 30.0,
+            product_weight_g: a.product_weight_g ?? 250,
+            height_cm: a.height_cm ?? 30.0,
             fragility_score: 5,
-            center_of_gravity: "Back",
-            accessory_count: 5,
-            accessory_weight_g: 45,
+            center_of_gravity: a.center_of_gravity ?? "Center",
+            accessory_count: a.accessory_count ?? 5,
+            accessory_weight_g: a.accessory_weight_g ?? 45,
             movement_score: 7,
-            complexity_score: 8,
-            stability_index: 4,
-            recommended_head_strap: 1,
-            recommended_waist_strap: 1,
-            recommended_hand_strap: 0,
-            recommended_leg_strap: 0,
+            complexity_score: a.poseComplexityScore ? Math.round(a.poseComplexityScore / 10) : 8,
+            stability_index: a.poseStabilityScore ? Math.round(a.poseStabilityScore / 10) : 4,
+            recommended_head_strap: zones.some((z: any) => z.zone.toLowerCase().includes("head") || z.zone.toLowerCase().includes("hair")) ? 1 : 0,
+            recommended_waist_strap: zones.some((z: any) => z.zone.toLowerCase().includes("waist") || z.zone.toLowerCase().includes("torso")) ? 1 : 0,
+            recommended_hand_strap: zones.some((z: any) => z.zone.toLowerCase().includes("arm") || z.zone.toLowerCase().includes("wrist") || z.zone.toLowerCase().includes("hand")) ? 1 : 0,
+            recommended_leg_strap: zones.some((z: any) => z.zone.toLowerCase().includes("leg") || z.zone.toLowerCase().includes("foot") || z.zone.toLowerCase().includes("ankle")) ? 1 : 0,
           })
-        });
-        if (res.ok) {
-          setApiData(await res.json());
-        }
-      } catch (e) {
-        console.error("Failed to fetch risk assessment API:", e);
+        })
+        .then(res => res.json())
+        .then(data => setApiData(data))
+        .catch(err => console.error("Failed to fetch risk assessment API:", err));
       }
     }
-    fetchApi();
   }, []);
 
   const attachmentCoverage = useMemo(

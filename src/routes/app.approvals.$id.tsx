@@ -4,11 +4,11 @@ import {
   ArrowLeft, CheckCircle2, XCircle, DollarSign, Leaf, Clock, Zap, Info, ShieldAlert, ImageIcon
 } from "lucide-react";
 import { useRef } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/page-header";
-import { loadAnalysis, DEMO_RESULT, type AnalysisResult, type AttachmentZone } from "@/lib/workflow-store";
+import { loadAnalysis, loadApprovalRequests, updateApprovalStatus, type AnalysisResult } from "@/lib/workflow-store";
 import { toast } from "sonner";
 import { getUser } from "@/lib/auth";
 
@@ -99,32 +99,56 @@ function ApprovalDetailsPage() {
   const navigate = useNavigate();
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [approvalReq, setApprovalReq] = useState<any | null>(null);
   const user = getUser();
-  const isApprover = user?.role === "manager" || user?.role === "admin";
+  const isApprover = user?.role === "manager" || user?.role === "Admin";
 
   useEffect(() => {
-    const a = loadAnalysis() ?? DEMO_RESULT;
-    setAnalysis(a);
-    setSelected(a.attachmentZones?.[0]?.zone ?? null);
-  }, []);
+    // Load the specific approval request
+    const reqs = loadApprovalRequests();
+    const req = reqs.find((r) => r.id === id);
+    if (req) setApprovalReq(req);
+    // Also load live analysis if available
+    const a = loadAnalysis();
+    if (a) {
+      setAnalysis(a);
+      setSelected(a.attachmentZones?.[0]?.zone ?? null);
+    } else if (req?.reportSnapshot?.zones?.length) {
+      // Fall back to snapshot zones
+      setSelected(req.reportSnapshot.zones[0]?.zone ?? null);
+    }
+  }, [id]);
 
-  const zones = analysis?.attachmentZones ?? DEMO_RESULT.attachmentZones;
-  const productName = analysis?.productName ?? DEMO_RESULT.productName;
-  const sel = zones.find((z) => z.zone === selected);
+  // Prefer live analysis zones, fall back to snapshot
+  const zones = analysis?.attachmentZones
+    ?? (approvalReq?.reportSnapshot?.zones?.map((z: any) => ({
+        zone: z.zone,
+        bodyRegion: z.zone,
+        riskLevel: "medium" as const,
+        recommendedMethod: z.recommendedMethod,
+        cost: `$${Number(z.cost).toFixed(2)}`,
+        labor: `${z.laborMins} min`,
+        sustainability: z.sustainability,
+      })) ?? []);
+  const productName = analysis?.productName ?? approvalReq?.sku ?? "Unknown Product";
+  const imageUrl = analysis?.imageDataUrl ?? approvalReq?.reportSnapshot?.imageDataUrl;
+  const sel = zones.find((z: any) => z.zone === selected);
 
   const handleApprove = () => {
+    updateApprovalStatus(id, "Approved");
     toast.success(`Request ${id} approved successfully.`);
     navigate({ to: "/app/approvals" });
   };
 
   const handleReject = () => {
+    updateApprovalStatus(id, "Rejected");
     toast.error(`Request ${id} rejected.`);
     navigate({ to: "/app/approvals" });
   };
 
-  const activeZones = zones.filter(z => z.recommendedMethod !== "No Attachment Required" && z.recommendedMethod !== "Not needed");
-  const totalLabor = activeZones.reduce((acc, z) => acc + (parseFloat(z.labor ?? "0") || 0), 0);
-  const avgSustain = activeZones.length > 0 ? Math.round(activeZones.reduce((acc, z) => acc + (z.sustainability ?? 100), 0) / activeZones.length) : 100;
+  const activeZones = zones.filter((z: any) => z.recommendedMethod !== "No Attachment Required" && z.recommendedMethod !== "Not needed");
+  const totalLabor = activeZones.reduce((acc: number, z: any) => acc + (parseFloat(z.labor ?? "0") || 0), 0);
+  const avgSustain = activeZones.length > 0 ? Math.round(activeZones.reduce((acc: number, z: any) => acc + (z.sustainability ?? 100), 0) / activeZones.length) : 100;
   const poseStab = analysis?.poseStabilityScore ?? 100;
 
   return (
@@ -160,6 +184,26 @@ function ApprovalDetailsPage() {
         ))}
       </div>
 
+      {!approvalReq && (
+        <div className="rounded-xl border border-dashed border-border/70 bg-muted/10 p-8 text-center text-muted-foreground text-sm">
+          Approval request not found. It may have been cleared.
+        </div>
+      )}
+
+      {approvalReq?.status !== "Pending" && approvalReq && (
+        <Card className={`shadow-none border ${approvalReq.status === "Approved" ? "border-[color:var(--success)]/40 bg-[color:var(--success)]/5" : "border-destructive/30 bg-destructive/5"}`}>
+          <CardContent className="flex items-center gap-3 p-4">
+            {approvalReq.status === "Approved"
+              ? <CheckCircle2 className="h-5 w-5 text-[color:var(--success)] shrink-0" />
+              : <XCircle className="h-5 w-5 text-destructive shrink-0" />}
+            <div>
+              <p className="text-sm font-semibold">This plan was {approvalReq.status}</p>
+              {approvalReq.decidedAt && <p className="text-xs text-muted-foreground">Decided at {approvalReq.decidedAt}</p>}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid gap-6 lg:grid-cols-5">
         <Card className="border-border/70 shadow-none lg:col-span-2">
           <CardHeader>
@@ -167,8 +211,8 @@ function ApprovalDetailsPage() {
             <CardDescription>Visual evidence from CV and AI processing</CardDescription>
           </CardHeader>
           <CardContent className="relative flex flex-col items-center justify-center overflow-hidden rounded-xl bg-zinc-950/5 p-4" style={{ minHeight: 380 }}>
-            {analysis?.imageDataUrl ? (
-              <YoloImageOverlay imageUrl={analysis.imageDataUrl} detections={analysis.cvDetections || []} threshold={0.15} />
+            {imageUrl ? (
+              <YoloImageOverlay imageUrl={imageUrl} detections={analysis?.cvDetections || []} threshold={0.15} />
             ) : (
               <div className="text-muted-foreground text-sm flex flex-col items-center gap-2">
                 <ImageIcon className="h-8 w-8 opacity-20" />
@@ -192,7 +236,7 @@ function ApprovalDetailsPage() {
                   <p className="text-xs text-muted-foreground mt-1">Neither AI nor CV detected any required attachment zones for this product.</p>
                 </div>
               ) : (
-                zones.map((z, i) => (
+                zones.map((z: any, i: number) => (
                 <button
                   key={z.zone}
                   onClick={() => setSelected(z.zone)}
@@ -258,35 +302,38 @@ function ApprovalDetailsPage() {
         </div>
       </div>
 
-      {isApprover ? (
-        <Card className="border-[color:var(--primary)]/30 bg-[color:var(--primary-soft)]/30 shadow-none">
-          <CardContent className="flex items-center justify-between gap-4 p-5">
-            <div>
-              <p className="text-base font-semibold">Make a Decision</p>
-              <p className="mt-0.5 text-sm text-muted-foreground">Approve this attachment plan to move it to production, or reject it back to the engineer.</p>
-            </div>
-            <div className="flex gap-3">
-              <Button variant="outline" className="text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/20" onClick={handleReject}>
-                <XCircle className="mr-2 h-4 w-4" /> Reject Plan
-              </Button>
-              <Button className="bg-[color:var(--success)] text-white hover:bg-[color:var(--success)]/90" onClick={handleApprove}>
-                <CheckCircle2 className="mr-2 h-4 w-4" /> Approve Plan
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card className="border-border/70 bg-muted/20 shadow-none">
-          <CardContent className="flex items-center justify-between gap-4 p-5">
-            <div>
-              <p className="text-base font-semibold">Status: Under Review</p>
-              <p className="mt-0.5 text-sm text-muted-foreground">This attachment plan is currently waiting for Operations Manager approval.</p>
-            </div>
-            <Badge variant="outline" className="border-[color:var(--warning)] text-[color:var(--warning-foreground)] px-3 py-1 text-xs">
-              Pending
-            </Badge>
-          </CardContent>
-        </Card>
+      {/* Decision panel — only show if still Pending */}
+      {approvalReq?.status === "Pending" && (
+        isApprover ? (
+          <Card className="border-[color:var(--primary)]/30 bg-[color:var(--primary-soft)]/30 shadow-none">
+            <CardContent className="flex items-center justify-between gap-4 p-5">
+              <div>
+                <p className="text-base font-semibold">Make a Decision</p>
+                <p className="mt-0.5 text-sm text-muted-foreground">Approve this attachment plan to move it to production, or reject it back to the engineer.</p>
+              </div>
+              <div className="flex gap-3">
+                <Button variant="outline" className="text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/20" onClick={handleReject}>
+                  <XCircle className="mr-2 h-4 w-4" /> Reject Plan
+                </Button>
+                <Button className="bg-[color:var(--success)] text-white hover:bg-[color:var(--success)]/90" onClick={handleApprove}>
+                  <CheckCircle2 className="mr-2 h-4 w-4" /> Approve Plan
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card className="border-border/70 bg-muted/20 shadow-none">
+            <CardContent className="flex items-center justify-between gap-4 p-5">
+              <div>
+                <p className="text-base font-semibold">Status: Under Review</p>
+                <p className="mt-0.5 text-sm text-muted-foreground">This attachment plan is currently waiting for Operations Manager approval.</p>
+              </div>
+              <Badge variant="outline" className="border-[color:var(--warning)] text-[color:var(--warning-foreground)] px-3 py-1 text-xs">
+                Pending
+              </Badge>
+            </CardContent>
+          </Card>
+        )
       )}
     </div>
   );

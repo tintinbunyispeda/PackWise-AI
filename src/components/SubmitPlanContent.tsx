@@ -440,6 +440,74 @@ function DecisionTrace({ steps }: { steps: TraceStep[] }) {
   );
 }
 
+function ProductPhotoSection({
+  imageDataUrl,
+  annotatedImageDataUrl,
+  productName,
+  accessories,
+  detectedPoses,
+  computedHeight,
+  computedComplexity,
+  computedCOG,
+}: {
+  imageDataUrl?: string | null;
+  annotatedImageDataUrl?: string | null;
+  productName: string;
+  accessories: string[];
+  detectedPoses?: string[];
+  computedHeight?: string;
+  computedComplexity?: string;
+  computedCOG?: string;
+}) {
+  if (!imageDataUrl && !annotatedImageDataUrl) return null;
+  return (
+    <Card className="border-border/70 shadow-none">
+      <CardContent className="pt-6">
+        <SectionHeader
+          index={1}
+          icon={Package}
+          title="Product Detection Result"
+          sub="AI-captured image with skeleton pose analysis and accessory detection."
+        />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          {imageDataUrl && (
+            <div className="space-y-2">
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">Original Captured Image</p>
+              <div className="rounded-xl overflow-hidden border border-border bg-muted/30 flex items-center justify-center min-h-[280px]">
+                <img src={imageDataUrl} alt="Product original" className="max-h-[320px] w-auto object-contain" />
+              </div>
+            </div>
+          )}
+          {annotatedImageDataUrl && (
+            <div className="space-y-2">
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">Annotated — Skeleton &amp; Zones</p>
+              <div className="rounded-xl overflow-hidden border border-border bg-muted/30 flex items-center justify-center min-h-[280px]">
+                <img src={annotatedImageDataUrl} alt="Product annotated" className="max-h-[320px] w-auto object-contain" />
+              </div>
+            </div>
+          )}
+          {imageDataUrl && !annotatedImageDataUrl && (
+            <div className="space-y-2">
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">Annotated — Skeleton &amp; Zones</p>
+              <div className="rounded-xl overflow-hidden border border-border bg-muted/30 flex items-center justify-center min-h-[280px] text-muted-foreground text-sm">
+                No annotated image available
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <KV label="Product Name" value={productName} />
+          <KV label="Detected Pose" value={(detectedPoses || []).join(", ") || "—"} />
+          <KV label="Computed Height" value={computedHeight || "—"} />
+          <KV label="Complexity" value={computedComplexity || "—"} />
+          <KV label="Center of Gravity" value={computedCOG || "—"} />
+          <KV label="Accessories Detected" value={accessories.length > 0 ? accessories.join(", ") : "None"} />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function FinalRecommendationCard({ rec }: { rec: FinalRecommendation }) {
   return (
     <Card className="border-border/70 shadow-none overflow-hidden">
@@ -732,7 +800,196 @@ export default function SubmitPlanContent() {
     URL.revokeObjectURL(url);
   };
 
-  const onExportPdf = () => window.print();
+  const onExportPdf = () => {
+    const imageUrl = analysis?.imageDataUrl || analysis?.annotatedImageDataUrl || "";
+    const annotatedUrl = analysis?.annotatedImageDataUrl || "";
+    const zonesHtml = (plan?.zones || []).map((z: any) => `
+      <tr>
+        <td>${z.zone}</td>
+        <td>${z.recommendedMethod}</td>
+        <td>${z.action}</td>
+        <td>$${Number(z.cost || 0).toFixed(2)}</td>
+        <td>${z.laborMins || 0} min</td>
+        <td>${z.sustainability || 0}%</td>
+      </tr>`).join("");
+    const rulesHtml = rules.map((r) => `
+      <tr>
+        <td>${r.id}</td>
+        <td>${r.rule}</td>
+        <td class="severity-${r.severity.toLowerCase()}">${r.severity}</td>
+        <td>${r.recommendation}</td>
+      </tr>`).join("");
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PackWise AI — Engineering Report ${metadata.runId}</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; color: #1a1a2e; background: #fff; font-size: 11px; }
+  .page { max-width: 900px; margin: 0 auto; padding: 32px; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #d946ef; padding-bottom: 16px; margin-bottom: 24px; }
+  .header-left h1 { font-size: 22px; font-weight: 700; color: #d946ef; }
+  .header-left p { font-size: 11px; color: #666; margin-top: 4px; }
+  .header-right { text-align: right; font-size: 10px; color: #888; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 99px; font-size: 10px; font-weight: 700; }
+  .badge-low { background: #d1fae5; color: #065f46; }
+  .badge-medium { background: #fef3c7; color: #92400e; }
+  .badge-high { background: #fee2e2; color: #991b1b; }
+  .grade-box { display: inline-flex; align-items: center; justify-content: center; width: 72px; height: 72px; border-radius: 16px; border: 2px solid #d946ef; font-size: 32px; font-weight: 700; color: #d946ef; margin-right: 16px; }
+  .section { margin-bottom: 28px; }
+  .section-title { font-size: 13px; font-weight: 700; color: #d946ef; text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 1px solid #f3e8ff; padding-bottom: 6px; margin-bottom: 12px; }
+  .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; }
+  .metric-card { background: #faf5ff; border: 1px solid #e9d5ff; border-radius: 10px; padding: 10px 12px; }
+  .metric-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; color: #9333ea; font-weight: 600; }
+  .metric-value { font-size: 20px; font-weight: 700; color: #1a1a2e; margin-top: 2px; }
+  .metric-unit { font-size: 10px; color: #888; }
+  .kv-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .kv-item { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 10px; }
+  .kv-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em; color: #9ca3af; font-weight: 600; }
+  .kv-value { font-size: 11px; font-weight: 600; color: #111827; margin-top: 2px; }
+  .photo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 12px; }
+  .photo-box { border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; background: #f9fafb; display: flex; flex-direction: column; }
+  .photo-box-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; color: #9ca3af; font-weight: 600; padding: 8px 10px; border-bottom: 1px solid #e5e7eb; }
+  .photo-box img { width: 100%; height: 260px; object-fit: contain; background: #fff; }
+  table { width: 100%; border-collapse: collapse; font-size: 10px; }
+  th { background: #faf5ff; color: #7c3aed; font-weight: 600; font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em; padding: 7px 10px; text-align: left; border-bottom: 1px solid #e9d5ff; }
+  td { padding: 6px 10px; border-bottom: 1px solid #f3f4f6; color: #374151; vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  .severity-high { color: #991b1b; font-weight: 700; }
+  .severity-medium { color: #92400e; font-weight: 700; }
+  .severity-low { color: #065f46; font-weight: 700; }
+  .rec-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .rec-item { background: #fdf4ff; border: 1px solid #f0abfc; border-radius: 10px; padding: 10px 12px; }
+  .rec-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; color: #a21caf; font-weight: 600; }
+  .rec-value { font-size: 11px; font-weight: 600; color: #581c87; margin-top: 3px; }
+  .footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-between; font-size: 9px; color: #9ca3af; }
+  .exec-top { display: flex; align-items: center; margin-bottom: 16px; }
+  @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="header">
+    <div class="header-left">
+      <h1>📦 PackWise AI — Engineering Report</h1>
+      <p>${config.productName} &nbsp;·&nbsp; Run ID: ${metadata.runId} &nbsp;·&nbsp; ${metadata.generatedAt}</p>
+    </div>
+    <div class="header-right">
+      <div>${metadata.modelVersion}</div>
+      <div>${metadata.ruleEngineVersion}</div>
+      <div>${metadata.knowledgeBaseVersion}</div>
+    </div>
+  </div>
+
+  <!-- Executive Summary -->
+  <div class="section">
+    <div class="section-title">Executive Summary</div>
+    <div class="exec-top">
+      <div class="grade-box">${summary.grade}</div>
+      <div>
+        <span class="badge badge-${summary.overallRisk.toLowerCase()}">${summary.overallRisk} RISK</span>
+        <div style="margin-top:6px;font-size:11px;color:#555;">Confidence: ${summary.confidence}% &nbsp;·&nbsp; ${metadata.rulesEvaluated} rules evaluated</div>
+      </div>
+    </div>
+    <div class="metrics-grid">
+      <div class="metric-card"><div class="metric-label">Drop Survival</div><div class="metric-value">${summary.dropSurvival}<span class="metric-unit">/100</span></div></div>
+      <div class="metric-card"><div class="metric-label">Movement Risk</div><div class="metric-value">${summary.movementRisk}</div></div>
+      <div class="metric-card"><div class="metric-label">Accessory Loss</div><div class="metric-value">${summary.accessoryLoss}<span class="metric-unit">%</span></div></div>
+      <div class="metric-card"><div class="metric-label">Packaging Cost</div><div class="metric-value" style="font-size:16px;">${summary.packagingCost}</div></div>
+      <div class="metric-card"><div class="metric-label">Sustainability</div><div class="metric-value">${summary.sustainability}<span class="metric-unit">%</span></div></div>
+      <div class="metric-card"><div class="metric-label">Est. Labor Time</div><div class="metric-value" style="font-size:14px;">${(plan?.zones || []).reduce((s: number, z: any) => s + (z.laborMins || 0), 0)} <span class="metric-unit">min</span></div></div>
+    </div>
+  </div>
+
+  <!-- Product Photos -->
+  ${(imageUrl || annotatedUrl) ? `
+  <div class="section">
+    <div class="section-title">Product Detection Image</div>
+    <div class="photo-grid">
+      ${imageUrl ? `<div class="photo-box"><div class="photo-box-label">Original Captured</div><img src="${imageUrl}" alt="Original" /></div>` : ""}
+      ${annotatedUrl ? `<div class="photo-box"><div class="photo-box-label">Annotated — Skeleton &amp; Zones</div><img src="${annotatedUrl}" alt="Annotated" /></div>` : ""}
+    </div>
+    <div class="kv-grid" style="margin-top:8px;">
+      <div class="kv-item"><div class="kv-label">Detected Pose</div><div class="kv-value">${(analysis?.detectedPoses || []).join(", ") || "—"}</div></div>
+      <div class="kv-item"><div class="kv-label">Computed Height</div><div class="kv-value">${analysis?.computedHeight || config.dimensions}</div></div>
+      <div class="kv-item"><div class="kv-label">Complexity</div><div class="kv-value">${analysis?.computedComplexity || "—"}</div></div>
+      <div class="kv-item"><div class="kv-label">Center of Gravity</div><div class="kv-value">${analysis?.computedCOG || config.centerOfGravity}</div></div>
+      <div class="kv-item"><div class="kv-label">Accessories</div><div class="kv-value">${(analysis?.accessories || []).join(", ") || "None"}</div></div>
+      <div class="kv-item"><div class="kv-label">Body Regions</div><div class="kv-value">${(analysis?.bodyRegions || []).join(", ") || "—"}</div></div>
+    </div>
+  </div>` : ""}
+
+  <!-- Packaging Configuration -->
+  <div class="section">
+    <div class="section-title">Packaging Configuration</div>
+    <div class="kv-grid">
+      <div class="kv-item"><div class="kv-label">Packaging Type</div><div class="kv-value">${config.packagingType}</div></div>
+      <div class="kv-item"><div class="kv-label">Attachment Method</div><div class="kv-value">${config.attachmentMethod}</div></div>
+      <div class="kv-item"><div class="kv-label">Cushion Material</div><div class="kv-value">${config.cushionMaterial}</div></div>
+      <div class="kv-item"><div class="kv-label">Cushion Thickness</div><div class="kv-value">${config.cushionThickness}</div></div>
+      <div class="kv-item"><div class="kv-label">ISTA Standard</div><div class="kv-value">${config.istaStandard}</div></div>
+      <div class="kv-item"><div class="kv-label">Support Points</div><div class="kv-value">${config.supportPoints}</div></div>
+      <div class="kv-item"><div class="kv-label">Weight</div><div class="kv-value">${config.weight}</div></div>
+      <div class="kv-item"><div class="kv-label">Center of Gravity</div><div class="kv-value">${config.centerOfGravity}</div></div>
+      <div class="kv-item"><div class="kv-label">Accessories Detected</div><div class="kv-value">${config.accessoriesDetected}</div></div>
+    </div>
+  </div>
+
+  <!-- Attachment Zones -->
+  ${zonesHtml ? `
+  <div class="section">
+    <div class="section-title">Attachment Zones Plan</div>
+    <table>
+      <thead><tr><th>Zone</th><th>Recommended Method</th><th>Action</th><th>Cost</th><th>Labor</th><th>Sustainability</th></tr></thead>
+      <tbody>${zonesHtml}</tbody>
+    </table>
+  </div>` : ""}
+
+  <!-- Triggered Rules -->
+  ${rulesHtml ? `
+  <div class="section">
+    <div class="section-title">Triggered Engineering Rules</div>
+    <table>
+      <thead><tr><th>Rule ID</th><th>Engineering Rule</th><th>Severity</th><th>Recommendation</th></tr></thead>
+      <tbody>${rulesHtml}</tbody>
+    </table>
+  </div>` : ""}
+
+  <!-- Final Recommendation -->
+  <div class="section">
+    <div class="section-title">Final Packaging Recommendation</div>
+    <div class="rec-grid">
+      <div class="rec-item"><div class="rec-label">Packaging</div><div class="rec-value">${finalRecommendation.packaging}</div></div>
+      <div class="rec-item"><div class="rec-label">Cushion</div><div class="rec-value">${finalRecommendation.cushion}</div></div>
+      <div class="rec-item"><div class="rec-label">Attachment</div><div class="rec-value">${finalRecommendation.attachment}</div></div>
+      <div class="rec-item"><div class="rec-label">Support</div><div class="rec-value">${finalRecommendation.support}</div></div>
+      <div class="rec-item"><div class="rec-label">ISTA</div><div class="rec-value">${finalRecommendation.ista}</div></div>
+      <div class="rec-item"><div class="rec-label">Deployment Status</div><div class="rec-value" style="color:#d946ef;">✔ ${finalRecommendation.status}</div></div>
+    </div>
+  </div>
+
+  <!-- Engineering Notes -->
+  ${notes ? `
+  <div class="section">
+    <div class="section-title">Engineering Notes</div>
+    <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:11px;color:#374151;white-space:pre-wrap;">${notes}</div>
+  </div>` : ""}
+
+  <div class="footer">
+    <div>PackWise AI · ${metadata.modelVersion} · ${metadata.ruleEngineVersion} · ${metadata.knowledgeBaseVersion}</div>
+    <div>Run ID: ${metadata.runId} · Confidence: ${metadata.confidence}% · ${metadata.literaturePapers} papers · ${metadata.rulesEvaluated} rules</div>
+  </div>
+</div>
+</body>
+</html>`;
+    const win = window.open("", "_blank");
+    if (win) {
+      win.document.write(html);
+      win.document.close();
+      setTimeout(() => win.print(), 500);
+    }
+  };
   const onPrint = () => window.print();
   const onExportJson = () =>
     download(JSON.stringify(payload, null, 2), `${metadata.runId}.json`, "application/json");
@@ -769,6 +1026,16 @@ export default function SubmitPlanContent() {
   return (
     <div className="lg:col-span-2 space-y-6">
         <ExecutiveSummary summary={summary} />
+        <ProductPhotoSection
+          imageDataUrl={analysis?.imageDataUrl}
+          annotatedImageDataUrl={analysis?.annotatedImageDataUrl}
+          productName={config.productName}
+          accessories={analysis?.accessories || []}
+          detectedPoses={analysis?.detectedPoses}
+          computedHeight={analysis?.computedHeight}
+          computedComplexity={analysis?.computedComplexity}
+          computedCOG={analysis?.computedCOG}
+        />
         <ConfigurationSummary config={config} />
         <RiskDashboard m={metrics} />
         <EngineeringFindings findings={findings} />

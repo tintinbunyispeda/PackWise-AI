@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Send, CheckCircle2 } from "lucide-react";
+import { Send, CheckCircle2, FileText, ArrowRight } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/page-header";
 import { toast } from "sonner";
 import { useState } from "react";
 import { saveApprovalRequest, loadAnalysis, loadPlan } from "@/lib/workflow-store";
+import { getUser } from "@/lib/auth";
 import SubmitPlanContent from "@/components/SubmitPlanContent";
 
 export const Route = createFileRoute("/app/submit-approval")({
@@ -16,22 +17,75 @@ export const Route = createFileRoute("/app/submit-approval")({
 
 function SubmitApprovalPage() {
   const navigate = useNavigate();
+  const [reportGenerated, setReportGenerated] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const user = getUser();
+
+  const handleGenerateReport = () => {
+    setReportGenerated(true);
+    toast.success("Report generated. Please review before submitting to manager.");
+    // Scroll to top of report
+    setTimeout(() => {
+      document.getElementById("report-section")?.scrollIntoView({ behavior: "smooth" });
+    }, 100);
+  };
 
   const handleSubmit = () => {
     setIsSubmitted(true);
-    
+
     const analysis = loadAnalysis();
     const plan = loadPlan();
-    
+
+    const totalLabor = (plan?.zones || []).reduce((s: number, z: any) => s + (z.laborMins || 0), 0);
+    const avgSustain = plan?.avgSustainability ?? 100;
+
+    // Build report snapshot to embed in approval request
+    const imageDataUrl = typeof sessionStorage !== "undefined"
+      ? (sessionStorage.getItem("packwise_image") || undefined)
+      : undefined;
+    const annotatedImageDataUrl = typeof sessionStorage !== "undefined"
+      ? (sessionStorage.getItem("packwise_annotated_image") || undefined)
+      : undefined;
+
     saveApprovalRequest({
-      id: `REQ-${Math.floor(Math.random() * 900) + 100}`,
+      id: `REQ-${Math.floor(Math.random() * 9000) + 1000}`,
       sku: analysis?.productName || "Custom Plan",
-      engineer: "Current User",
-      date: new Date().toLocaleDateString() + ", " + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      risk: analysis && analysis.movementRiskScore > 60 ? "High" : analysis && analysis.movementRiskScore > 30 ? "Medium" : "Low",
+      engineer: user?.name || user?.email || "Packaging Engineer",
+      date: new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })
+        + ", " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      risk: analysis && analysis.movementRiskScore > 60 ? "High"
+        : analysis && analysis.movementRiskScore > 30 ? "Medium" : "Low",
       cost: plan ? `$${plan.totalCost.toFixed(2)}/unit` : "$0.00/unit",
-      status: "Pending"
+      laborTime: `${totalLabor} min`,
+      sustainability: avgSustain,
+      status: "Pending",
+      reportSnapshot: {
+        grade: "B",
+        overallRisk: analysis && analysis.movementRiskScore > 60 ? "HIGH"
+          : analysis && analysis.movementRiskScore > 30 ? "MEDIUM" : "LOW",
+        dropSurvival: analysis ? Math.max(0, 100 - analysis.movementRiskScore) : 80,
+        movementRisk: analysis?.movementRiskScore ?? 0,
+        accessoryLoss: analysis?.accessoryLossRisk ?? 0,
+        zones: (plan?.zones || []).map((z: any) => ({
+          zone: z.zone,
+          recommendedMethod: z.recommendedMethod,
+          action: z.action,
+          cost: z.cost || 0,
+          laborMins: z.laborMins || 0,
+          sustainability: z.sustainability || 100,
+        })),
+        finalRecommendation: {
+          packaging: "Eco-friendly Window Box",
+          cushion: "Molded Pulp Insert",
+          attachment: plan?.recommendedMaterial || "Optimized Strapping",
+          support: "Multi-point support",
+          ista: "ISTA 3A Certified",
+        },
+        imageDataUrl,
+        annotatedImageDataUrl,
+        accessories: analysis?.accessories,
+        detectedPoses: analysis?.detectedPoses,
+      },
     });
 
     toast.success("Attachment plan successfully submitted to Operations Manager.");
@@ -44,23 +98,73 @@ function SubmitApprovalPage() {
     <div className="space-y-6">
       <PageHeader
         title="Submit Plan for Approval"
-        description="Review the finalized attachment plan, including cost and risk metrics, before submitting to the Operations Manager."
+        description="Generate your engineering report first, then submit it to the Operations Manager for review."
       />
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <SubmitPlanContent />
+      {/* Step indicator */}
+      <div className="flex items-center gap-3">
+        <div className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${reportGenerated ? "bg-[color:var(--success)] text-white" : "bg-primary text-white"}`}>
+          {reportGenerated ? <CheckCircle2 className="h-4 w-4" /> : "1"}
+        </div>
+        <span className={`text-sm font-medium ${reportGenerated ? "text-[color:var(--success)]" : "text-foreground"}`}>
+          Generate Report
+        </span>
+        <ArrowRight className="h-4 w-4 text-muted-foreground" />
+        <div className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${isSubmitted ? "bg-[color:var(--success)] text-white" : reportGenerated ? "bg-primary text-white" : "bg-muted text-muted-foreground border border-border"}`}>
+          {isSubmitted ? <CheckCircle2 className="h-4 w-4" /> : "2"}
+        </div>
+        <span className={`text-sm font-medium ${isSubmitted ? "text-[color:var(--success)]" : reportGenerated ? "text-foreground" : "text-muted-foreground"}`}>
+          Submit to Manager
+        </span>
+      </div>
 
+      {/* Step 1: Generate report button (shown before report is generated) */}
+      {!reportGenerated && (
+        <Card className="border-[color:var(--primary)]/30 bg-[color:var(--primary-soft)]/20 shadow-none">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <FileText className="h-5 w-5 text-primary" />
+              Step 1 — Generate Engineering Report
+            </CardTitle>
+            <CardDescription>
+              Click below to generate the full AI engineering report based on your analysis and packaging plan.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button className="w-full h-12 text-base font-semibold" onClick={handleGenerateReport}>
+              <FileText className="mr-2 h-5 w-5" /> Generate Report
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      <div className="grid gap-6 lg:grid-cols-3">
+        {/* Report content (shown after generate) */}
+        {reportGenerated && (
+          <div id="report-section" className="lg:col-span-2">
+            <SubmitPlanContent />
+          </div>
+        )}
+
+        {/* Right sidebar */}
         <div className="space-y-6">
-          <Card className="border-[color:var(--primary)]/30 bg-[color:var(--primary-soft)]/20 shadow-none">
+          {/* Step 2: Submit button */}
+          <Card className={`shadow-none ${reportGenerated ? "border-[color:var(--success)]/40 bg-[color:var(--success)]/5" : "border-border/50 bg-muted/20 opacity-60"}`}>
             <CardHeader>
-              <CardTitle className="text-base">Submit to Manager</CardTitle>
-              <CardDescription>This will notify the Operations Manager to review your plan.</CardDescription>
+              <CardTitle className="text-base">
+                {reportGenerated ? "Step 2 — Submit to Manager" : "Submit to Manager"}
+              </CardTitle>
+              <CardDescription>
+                {reportGenerated
+                  ? "Report is ready. Submit to the Operations Manager for approval."
+                  : "Generate the report first before submitting."}
+              </CardDescription>
             </CardHeader>
             <CardContent>
-              <Button 
-                className="w-full h-12 text-base font-semibold bg-[color:var(--success)] hover:bg-[color:var(--success)]/90 text-white" 
+              <Button
+                className="w-full h-12 text-base font-semibold bg-[color:var(--success)] hover:bg-[color:var(--success)]/90 text-white"
                 onClick={handleSubmit}
-                disabled={isSubmitted}
+                disabled={!reportGenerated || isSubmitted}
               >
                 {isSubmitted ? (
                   <>Submitted Successfully <CheckCircle2 className="ml-2 h-5 w-5" /></>
@@ -68,9 +172,15 @@ function SubmitApprovalPage() {
                   <>Submit Plan <Send className="ml-2 h-4 w-4" /></>
                 )}
               </Button>
+              {!reportGenerated && (
+                <p className="text-xs text-muted-foreground mt-2 text-center">
+                  ⬆ Generate the report first
+                </p>
+              )}
             </CardContent>
           </Card>
-          
+
+          {/* Approval workflow steps */}
           <Card className="border-border/70 shadow-none">
             <CardHeader className="pb-3">
               <CardTitle className="text-sm">Approval Workflow</CardTitle>
@@ -90,8 +200,20 @@ function SubmitApprovalPage() {
               </div>
               <div className="flex gap-3">
                 <div className="flex flex-col items-center">
-                  <div className="h-6 w-6 rounded-full bg-primary/20 text-primary flex items-center justify-center">
-                    <div className="h-2 w-2 rounded-full bg-primary" />
+                  <div className={`h-6 w-6 rounded-full flex items-center justify-center ${reportGenerated ? "bg-[color:var(--success)]/20 text-[color:var(--success)]" : "bg-muted border border-border"}`}>
+                    {reportGenerated ? <CheckCircle2 className="h-3.5 w-3.5" /> : <div className="h-2 w-2 rounded-full bg-muted-foreground" />}
+                  </div>
+                  <div className="w-px h-8 bg-border my-1" />
+                </div>
+                <div className="pt-0.5">
+                  <p className="text-sm font-medium">Report Generated</p>
+                  <p className="text-xs text-muted-foreground">Engineering report ready for review</p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <div className="flex flex-col items-center">
+                  <div className={`h-6 w-6 rounded-full flex items-center justify-center ${isSubmitted ? "bg-[color:var(--success)]/20 text-[color:var(--success)]" : reportGenerated ? "bg-primary/20 text-primary" : "bg-muted border border-border"}`}>
+                    {isSubmitted ? <CheckCircle2 className="h-3.5 w-3.5" /> : <div className="h-2 w-2 rounded-full bg-primary" />}
                   </div>
                   <div className="w-px h-8 bg-border my-1" />
                 </div>
@@ -113,6 +235,22 @@ function SubmitApprovalPage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Summary badge */}
+          {reportGenerated && (
+            <Card className="border-border/70 shadow-none">
+              <CardContent className="p-4 flex items-center gap-3">
+                <CheckCircle2 className="h-5 w-5 text-[color:var(--success)] shrink-0" />
+                <div>
+                  <p className="text-sm font-medium">Report Ready</p>
+                  <p className="text-xs text-muted-foreground">Review the report on the left, then submit.</p>
+                </div>
+                <Badge className="ml-auto bg-[color:var(--success)]/10 text-[color:var(--success)] border-transparent">
+                  Ready
+                </Badge>
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
     </div>

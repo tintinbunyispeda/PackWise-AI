@@ -196,7 +196,24 @@ export interface ApprovalRequest {
   date: string;
   risk: string;
   cost: string;
+  laborTime?: string;
+  sustainability?: number;
   status: "Pending" | "Approved" | "Rejected";
+  decidedAt?: string;
+  // Snapshot of the report data embedded so manager can view it
+  reportSnapshot?: {
+    grade: string;
+    overallRisk: string;
+    dropSurvival: number;
+    movementRisk: number;
+    accessoryLoss: number;
+    zones: Array<{ zone: string; recommendedMethod: string; action: string; cost: number; laborMins: number; sustainability: number }>;
+    finalRecommendation: { packaging: string; cushion: string; attachment: string; support: string; ista: string };
+    imageDataUrl?: string;
+    annotatedImageDataUrl?: string;
+    accessories?: string[];
+    detectedPoses?: string[];
+  };
 }
 
 export function saveApprovalRequest(req: ApprovalRequest) {
@@ -212,4 +229,16 @@ export function loadApprovalRequests(): ApprovalRequest[] {
     const raw = localStorage.getItem(APPROVALS_KEY);
     return raw ? JSON.parse(raw) : [];
   } catch { return []; }
+}
+
+export function updateApprovalStatus(id: string, status: "Approved" | "Rejected") {
+  try {
+    const all = loadApprovalRequests();
+    const idx = all.findIndex((r) => r.id === id);
+    if (idx !== -1) {
+      all[idx].status = status;
+      all[idx].decidedAt = new Date().toLocaleString();
+      localStorage.setItem(APPROVALS_KEY, JSON.stringify(all));
+    }
+  } catch (e) { console.warn("updateApprovalStatus failed", e); }
 }

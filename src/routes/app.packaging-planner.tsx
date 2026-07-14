@@ -270,6 +270,30 @@ function buildZonePlan(xgbData: Record<string, any>, detections: any[], threshol
   return { plan, vizZones };
 }
 
+const mapPoseToXGB = (poses: string[]) => {
+  if (!poses || poses.length === 0) return "Arms Open";
+  const hasLeftArmUp = poses.includes("Left Arm Raised");
+  const hasRightArmUp = poses.includes("Right Arm Raised");
+  const hasLeftHip = poses.includes("Left Hand on Hip");
+  const hasRightHip = poses.includes("Right Hand on Hip");
+  const hasSitting = poses.includes("Sitting Pose");
+  const hasStanding = poses.includes("Standing Neutral");
+  
+  if (hasLeftArmUp && hasRightArmUp) return "Two Hands Up";
+  if (hasLeftArmUp || hasRightArmUp) return "One Hand Up";
+  if (hasLeftHip || hasRightHip) return "One Hand on Hip";
+  if (hasSitting) return "Sitting";
+  if (hasStanding) return "Standing Straight";
+  return "Arms Open";
+};
+
+const getBaseCOG = (cogStr: string) => {
+  const s = (cogStr || "").toLowerCase();
+  if (s.includes("back")) return "Back";
+  if (s.includes("left")) return "Left";
+  return "Center";
+};
+
 function AttachmentPlannerPage() {
   const navigate = useNavigate();
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
@@ -286,6 +310,9 @@ function AttachmentPlannerPage() {
     setAnalysis(a);
 
     async function fetchPredictions() {
+      const mappedPose = mapPoseToXGB(a.detectedPoses || []);
+      const mappedCOG = getBaseCOG(a.center_of_gravity || a.computedCOG || "Center");
+
       try {
         const res = await fetch("http://127.0.0.1:8000/api/predict-packaging", {
           method: "POST",
@@ -293,15 +320,17 @@ function AttachmentPlannerPage() {
           body: JSON.stringify({
             product_family: a.product_family ?? "Fashionistas",
             articulation: a.articulation ?? "Standard",
-            pose: a.pose ?? "Arms Open",
+            pose: mappedPose,
             product_weight_g: a.product_weight_g ?? 120,
             height_cm: a.height_cm ?? 29.0,
-            center_of_gravity: a.center_of_gravity ?? "Center",
+            center_of_gravity: mappedCOG,
             hair_length: a.hair_length ?? "Short",
             dress_length: a.dress_length ?? "Short",
             accessory_count: a.accessory_count ?? 1,
             accessory_weight_g: a.accessory_weight_g ?? 15,
-            selected_accessories: a.selected_accessories ?? []
+            selected_accessories: a.selected_accessories ?? [],
+            complexity_score: a.computedComplexity && a.computedComplexity.includes("High") ? 8 : 3,
+            stability_index: a.poseStatus?.left_arm_up || a.poseStatus?.right_arm_up ? 3 : 5
           })
         });
         const data = await res.json();

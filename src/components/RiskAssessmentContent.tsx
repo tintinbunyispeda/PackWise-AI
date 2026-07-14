@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { Link } from "@tanstack/react-router";
 import { getToken } from "@/lib/auth";
+import { loadAnalysis, loadPlan } from "@/lib/workflow-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -213,10 +214,32 @@ const EVIDENCE_MAP: Record<string, FailureEvidence> = {
   Legs: { evidenceId: "E004", suggestedRule: "Reinforce Knee-Joint Cradle" },
   Waist: { evidenceId: "E001", suggestedRule: "Molded Torso Cradle" },
   Glasses: { evidenceId: "E005", suggestedRule: "Micro-Blister Recess" },
+  Sunglasses: { evidenceId: "E005", suggestedRule: "Micro-Blister Recess" },
   Handbag: { evidenceId: "E007", suggestedRule: "Elastic Loop Retention" },
   Crown: { evidenceId: "E005", suggestedRule: "Micro-Clip Retention" },
   Shoes: { evidenceId: "E004", suggestedRule: "Paired Foot Cradle" },
+  "Shoes (Pair)": { evidenceId: "E004", suggestedRule: "Paired Foot Cradle" },
   "Dress Stand": { evidenceId: "E006", suggestedRule: "PET Base Lock" },
+  Hat: { evidenceId: "E005", suggestedRule: "Blister Pack Hook" },
+  Necklace: { evidenceId: "E007", suggestedRule: "Tape Securing" },
+  Brush: { evidenceId: "E007", suggestedRule: "Pocket Insert" },
+  "Pet Dog": { evidenceId: "E006", suggestedRule: "Molded Torso Cradle" },
+  Backpack: { evidenceId: "E006", suggestedRule: "Molded Torso Cradle" },
+};
+
+const ACCESSORY_DEFAULTS: Record<string, { secured: boolean; small: boolean }> = {
+  "Handbag": { secured: true, small: true },
+  "Shoes (Pair)": { secured: true, small: true },
+  "Shoes": { secured: true, small: true },
+  "Sunglasses": { secured: false, small: true },
+  "Glasses": { secured: false, small: true },
+  "Hat": { secured: false, small: true },
+  "Crown": { secured: false, small: true },
+  "Necklace": { secured: false, small: true },
+  "Brush": { secured: false, small: true },
+  "Pet Dog": { secured: true, small: false },
+  "Backpack": { secured: true, small: false },
+  "Dress Stand": { secured: true, small: false }
 };
 
 function evidenceFor(region: string): FailureEvidence {
@@ -256,6 +279,13 @@ function dropLevel(score: number): { label: "LOW" | "MEDIUM" | "HIGH"; tone: str
 const clamp = (n: number, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, n));
 const round = (n: number) => Math.round(n * 10) / 10;
 
+const getBaseCOG = (cogStr: string) => {
+  const s = (cogStr || "").toLowerCase();
+  if (s.includes("back")) return "Back";
+  if (s.includes("left")) return "Left";
+  return "Center";
+};
+
 export default function RiskAssessmentContent({
   packagingConfig = DEFAULT_PACKAGING_CONFIG,
   ruleEngineStatus = DEFAULT_RULE_ENGINE_STATUS,
@@ -274,19 +304,9 @@ export default function RiskAssessmentContent({
     support: 3,
   });
 
-  const [accessories, setAccessories] = useState<Accessory[]>([
-    { name: "Glasses", secured: false, small: true },
-    { name: "Handbag", secured: true, small: true },
-    { name: "Crown", secured: false, small: true },
-    { name: "Shoes", secured: true, small: true },
-    { name: "Dress Stand", secured: true, small: false },
-  ]);
+  const [accessories, setAccessories] = useState<Accessory[]>([]);
 
-  const [attachments] = useState<Attachment[]>([
-    { region: "Hair", type: "Elastic Strap", coverage: 70 },
-    { region: "Waist", type: "PET Support", coverage: 85 },
-    { region: "Wrist", type: "EVA Strap", coverage: 65 },
-  ]);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
 
   const [scenario, setScenario] = useState<ScenarioKey>("normal");
   const [confOpen, setConfOpen] = useState(false);
@@ -297,28 +317,98 @@ export default function RiskAssessmentContent({
   const [apiData, setApiData] = useState<any>(null);
 
   useEffect(() => {
+    const analysis = loadAnalysis();
+    if (analysis) {
+      setProduct({
+        name: analysis.productName || `${analysis.product_family} Doll`,
+        category: analysis.category || "Fashion Doll",
+        complexity: analysis.computedComplexity && analysis.computedComplexity.includes("High") ? 85 : 45,
+        support: 3
+      });
+
+      const mapped = (analysis.selected_accessories || []).map((accName: string) => {
+        let normName = accName;
+        if (accName.toLowerCase().includes("shoes")) normName = "Shoes";
+        if (accName.toLowerCase().includes("sunglasses") || accName.toLowerCase().includes("glasses")) normName = "Glasses";
+        
+        const defaults = ACCESSORY_DEFAULTS[normName] || { secured: false, small: true };
+        return {
+          name: normName,
+          secured: defaults.secured,
+          small: defaults.small
+        };
+      });
+      setAccessories(mapped);
+    }
+
+    const plan = loadPlan();
+    if (plan && plan.zones) {
+      const mappedAttachments = plan.zones
+        .filter(z => z.action === "Keep" || z.action === "Add" || z.action === "Replace")
+        .map(z => ({
+          region: z.zone,
+          type: z.recommendedMethod || z.currentMethod,
+          coverage: z.stability || 70
+        }));
+      setAttachments(mappedAttachments);
+    }
+  }, []);
+
+  useEffect(() => {
     async function fetchApi() {
       const token = getToken();
       if (!token) return;
+
+      const analysis = loadAnalysis();
+      const plan = loadPlan();
+
+      let headStrap = 0;
+      let waistStrap = 0;
+      let handStrap = 0;
+      let legStrap = 0;
+
+      if (plan && plan.zones) {
+        plan.zones.forEach(z => {
+          const act = z.action;
+          if (act === "Keep" || act === "Add" || act === "Replace") {
+            const zName = z.zone.toLowerCase();
+            const method = (z.recommendedMethod || z.currentMethod || "").toLowerCase();
+            const qty = method.includes("double") ? 2 : 1;
+
+            if (zName.includes("head") || zName.includes("hair")) headStrap += qty;
+            else if (zName.includes("waist") || zName.includes("torso")) waistStrap += qty;
+            else if (zName.includes("wrist") || zName.includes("arm") || zName.includes("hand")) handStrap += qty;
+            else if (zName.includes("ankle") || zName.includes("leg") || zName.includes("foot")) legStrap += qty;
+          }
+        });
+      }
+
+      const weight = analysis ? analysis.product_weight_g : 250;
+      const height = analysis ? analysis.height_cm : 30.0;
+      const cog = analysis ? getBaseCOG(analysis.center_of_gravity || "Center") : "Center";
+      const accCount = analysis ? (analysis.selected_accessories || []).length : 5;
+      const accWeight = analysis ? analysis.accessory_weight_g : 45;
+      const complexity = analysis && analysis.computedComplexity && analysis.computedComplexity.includes("High") ? 8 : 4;
+
       try {
         const res = await fetch("http://localhost:8000/predict", {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
           body: JSON.stringify({
             plan_id: 1,
-            product_weight_g: 250,
-            height_cm: 30.0,
+            product_weight_g: weight,
+            height_cm: height,
             fragility_score: 5,
-            center_of_gravity: "Back",
-            accessory_count: 5,
-            accessory_weight_g: 45,
+            center_of_gravity: cog,
+            accessory_count: accCount,
+            accessory_weight_g: accWeight,
             movement_score: 7,
-            complexity_score: 8,
+            complexity_score: complexity,
             stability_index: 4,
-            recommended_head_strap: 1,
-            recommended_waist_strap: 1,
-            recommended_hand_strap: 0,
-            recommended_leg_strap: 0,
+            recommended_head_strap: headStrap,
+            recommended_waist_strap: waistStrap,
+            recommended_hand_strap: handStrap,
+            recommended_leg_strap: legStrap,
           })
         });
         if (res.ok) {

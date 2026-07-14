@@ -65,6 +65,8 @@ function ProductAnalysisPage() {
   const [annotatedImage, setAnnotatedImage] = useState<string | null>(null);
   const [rawKeypoints, setRawKeypoints] = useState<any[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [savedDolls, setSavedDolls] = useState<any[]>([]);
+  const [dollName, setDollName] = useState("");
 
   // Image Upload
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -105,6 +107,17 @@ function ProductAnalysisPage() {
   const [selectedAccessories, setSelectedAccessories] = useState<{ name: string, weight: number }[]>([]);
   const [accSearch, setAccSearch] = useState("");
 
+  const loadSavedDolls = async () => {
+    try {
+      const { data, error } = await supabase.from('product_analyses').select('*').order('created_at', { ascending: false });
+      if (!error && data) {
+        setSavedDolls(data);
+      }
+    } catch (e) {
+      console.error("Failed to load saved dolls", e);
+    }
+  };
+
   useEffect(() => {
     async function loadMasterData() {
       try {
@@ -116,17 +129,47 @@ function ProductAnalysisPage() {
             handleFamilyChange(pfData[0].product_family, pfData);
           }
         }
-        // Accessory fetch disabled, using static data instead
-        // const accRes = await fetch("http://127.0.0.1:8000/api/accessories");
-        // if (accRes.ok) {
-        //   setMasterAccessories(await accRes.json());
-        // }
       } catch (e) {
         console.error("Failed to load master data", e);
       }
     }
     loadMasterData();
+    loadSavedDolls();
   }, []);
+
+  const handleLoadDoll = (id: string) => {
+    const doll = savedDolls.find(d => d.id === id);
+    if (!doll || !doll.raw_keypoints) return;
+    
+    const meta = doll.raw_keypoints;
+    const isLegacy = Array.isArray(meta);
+    const keypoints = isLegacy ? meta : (meta.keypoints || []);
+
+    setDollName(doll.product_name || "");
+    setProductFamily(isLegacy ? "Dreamtopia" : (meta.product_family || "Dreamtopia"));
+    setArticulation(isLegacy ? "Standard" : (meta.articulation || "Standard"));
+    setPose(isLegacy ? "Arms Open" : (meta.pose || "Arms Open"));
+    setHairLength(isLegacy ? "Short" : (meta.hair_length || "Short"));
+    setDressLength(isLegacy ? "Short" : (meta.dress_length || "Short"));
+    setHeightCm(isLegacy ? 29.0 : (meta.height_cm || 29.0));
+    setWeightG(isLegacy ? 120 : (meta.weight_g || 120));
+    setSelectedAccessories(isLegacy ? [] : (meta.selected_accessories || []));
+    setImageDataUrl(isLegacy ? null : (meta.image_data_url || null));
+    setAnnotatedImage(isLegacy ? null : (meta.annotated_image || null));
+    setDetectedStraps(isLegacy ? [] : (meta.detected_straps || []));
+    setDetectedPoses(doll.detected_poses || []);
+    setPoseStatus(isLegacy ? null : (meta.pose_status || null));
+    setRawKeypoints(keypoints);
+    setComputedHeight(isLegacy ? "29.5 cm" : (meta.computedHeight || "29.5 cm"));
+    setComputedComplexity(isLegacy ? "Low (Standard)" : (meta.computedComplexity || "Low (Standard)"));
+    setComputedCOG(isLegacy ? "Center" : (meta.computedCOG || "Center"));
+    
+    if (!isLegacy && (meta.annotated_image || meta.image_data_url)) {
+      setStage("results");
+    } else {
+      setStage("form"); // Default back to form if legacy (so they can re-run CV)
+    }
+  };
 
   const handleFile = (f: File) => {
     setImageFile(f);
@@ -206,9 +249,7 @@ function ProductAnalysisPage() {
 
   const handleAnalyse = async () => {
     setStage("analysing");
-    setProgress(0);
-    const ticks = [15, 32, 50, 66, 82, 100];
-    ticks.forEach((p, i) => setTimeout(() => setProgress(p), (i + 1) * 700)); // slightly slower to wait for CV
+    setProgress(20);
 
     let detections = [];
 
@@ -268,8 +309,8 @@ function ProductAnalysisPage() {
             }
           }
 
-          // Switch to results stage after progress finishes
-          setTimeout(() => setStage("results"), 4200);
+          setProgress(100);
+          setStage("results");
           return;
         }
       } catch (e) {
@@ -277,61 +318,79 @@ function ProductAnalysisPage() {
       }
     }
 
-    setTimeout(() => {
-      // Mock skeleton logic for demo without backend
-      setComputedHeight("29.2 cm (Estimated from skeleton)");
-      setComputedComplexity("High / Dynamic (Arm bent)");
-      setComputedCOG("Center (Hip midpoint estimated)");
-      setDetectedStraps([
-        { class_name: "waist_strap", confidence: 0.92 },
-        { class_name: "neck_support", confidence: 0.85 }
-      ]);
-      setDetectedPoses(["Standing Neutral"]);
+    // Mock skeleton logic for demo without backend
+    setComputedHeight("29.2 cm (Estimated from skeleton)");
+    setComputedComplexity("High / Dynamic (Arm bent)");
+    setComputedCOG("Center (Hip midpoint estimated)");
+    setDetectedStraps([
+      { class_name: "waist_strap", confidence: 0.92 },
+      { class_name: "neck_support", confidence: 0.85 }
+    ]);
+    setDetectedPoses(["Standing Neutral"]);
 
-      const r: AnalysisResult = {
-        productName: `${productFamily} Doll`,
-        category: "Fashion Doll",
-        imageDataUrl: imageDataUrl,
-        productType: "Doll",
-        dimensions: `${heightCm}cm`,
-        analysedAt: new Date().toISOString(),
+    const r: AnalysisResult = {
+      productName: `${productFamily} Doll`,
+      category: "Fashion Doll",
+      imageDataUrl: imageDataUrl,
+      productType: "Doll",
+      dimensions: `${heightCm}cm`,
+      analysedAt: new Date().toISOString(),
 
-        product_family: productFamily,
-        articulation: articulation,
-        pose: pose,
-        product_weight_g: weightG,
-        height_cm: heightCm,
-        center_of_gravity: computedCOG,
-        hair_length: hairLength,
-        dress_length: dressLength,
-        accessory_count: selectedAccessories.length,
-        accessory_weight_g: selectedAccessories.reduce((acc, curr) => acc + curr.weight, 0),
-        selected_accessories: selectedAccessories.map((a) => a.name),
-        cvDetections: detections,
+      product_family: productFamily,
+      articulation: articulation,
+      pose: pose,
+      product_weight_g: weightG,
+      height_cm: heightCm,
+      center_of_gravity: computedCOG,
+      hair_length: hairLength,
+      dress_length: dressLength,
+      accessory_count: selectedAccessories.length,
+      accessory_weight_g: selectedAccessories.reduce((acc, curr) => acc + curr.weight, 0),
+      selected_accessories: selectedAccessories.map((a) => a.name),
+      cvDetections: [],
 
-        accessories: selectedAccessories.map((a) => a.name),
-        bodyRegions: ["Head", "Torso", "Arms", "Legs"],
-        attachmentZones: [],
-        poseComplexityScore: 0,
-        poseStabilityScore: 0,
-        movementRiskScore: 0,
-        accessoryLossRisk: 0,
-      };
+      accessories: selectedAccessories.map((a) => a.name),
+      bodyRegions: ["Head", "Torso", "Arms", "Legs"],
+      attachmentZones: [],
+      poseComplexityScore: 0,
+      poseStabilityScore: 0,
+      movementRiskScore: 0,
+      accessoryLossRisk: 0,
+    };
 
-      setStage("results");
-    }, 4500);
+    setProgress(100);
+    setStage("results");
   };
 
   const handleContinue = async () => {
     setIsSaving(true);
 
+    const finalDollName = dollName.trim() || `${productFamily} Doll`;
+
     // Save to Supabase (Database Temanmu)
     try {
       const { error } = await supabase.from('product_analyses').insert([
         {
-          product_name: `${productFamily} Doll`,
+          product_name: finalDollName,
           detected_poses: detectedPoses,
-          raw_keypoints: rawKeypoints
+          raw_keypoints: {
+            keypoints: rawKeypoints,
+            product_family: productFamily,
+            articulation: articulation,
+            pose: pose,
+            hair_length: hairLength,
+            dress_length: dressLength,
+            height_cm: heightCm,
+            weight_g: weightG,
+            selected_accessories: selectedAccessories,
+            image_data_url: imageDataUrl,
+            annotated_image: annotatedImage,
+            detected_straps: detectedStraps,
+            pose_status: poseStatus,
+            computedHeight: computedHeight,
+            computedComplexity: computedComplexity,
+            computedCOG: computedCOG
+          }
         }
       ]);
 
@@ -339,7 +398,8 @@ function ProductAnalysisPage() {
         console.error("Supabase Error:", error);
         alert("Gagal simpan ke Supabase! (Cek Console) Apakah tabelnya sudah dibuat temanmu?");
       } else {
-        console.log("Sukses! 17 Titik YOLO dan Pose tersimpan di Supabase.");
+        console.log("Sukses! 17 Titik YOLO and configuration saved to Supabase.");
+        loadSavedDolls(); // Refresh dropdown
       }
     } catch (err) {
       console.error("Supabase Exception:", err);
@@ -348,7 +408,7 @@ function ProductAnalysisPage() {
     setIsSaving(false);
 
     const r: AnalysisResult = {
-      productName: `${productFamily} Doll`,
+      productName: finalDollName,
       category: "Fashion Doll",
       imageDataUrl: annotatedImage || imageDataUrl,
       productType: "Doll",
@@ -525,6 +585,26 @@ function ProductAnalysisPage() {
       <div className="grid gap-6 lg:grid-cols-5">
         <div className="space-y-5 lg:col-span-3">
 
+          {savedDolls.length > 0 && (
+            <Card className="border-border/70 shadow-none">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                  <ImageIcon className="h-4 w-4 text-primary" /> Load Saved Doll Configuration
+                </CardTitle>
+                <CardDescription>Reuse parameters and detections from a past session.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <select onChange={(e) => handleLoadDoll(e.target.value)} defaultValue=""
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus:outline-none">
+                  <option value="" disabled>-- Select a Saved Doll --</option>
+                  {savedDolls.map((d) => (
+                    <option key={d.id} value={d.id}>{d.product_name} ({new Date(d.created_at).toLocaleDateString()})</option>
+                  ))}
+                </select>
+              </CardContent>
+            </Card>
+          )}
+
           <Card className="border-border/70 shadow-none overflow-hidden">
             <CardHeader className="bg-muted/30 pb-4 border-b flex flex-row items-center justify-between space-y-0">
               <div>
@@ -601,6 +681,15 @@ function ProductAnalysisPage() {
               <CardTitle className="text-base">Product Identity</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="dollName">Doll Name / Model</Label>
+                <Input
+                  id="dollName"
+                  placeholder="e.g. Dreamtopia Barbie Mermaid 2026"
+                  value={dollName}
+                  onChange={(e) => setDollName(e.target.value)}
+                />
+              </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Product Family</Label>

@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import {
   FileBarChart2,
@@ -271,6 +271,7 @@ function ReportDetailModal({ report, onClose }: { report: Report; onClose: () =>
 }
 
 function ReportsPage() {
+  const navigate = useNavigate();
   const [selected, setSelected] = useState<Report | null>(null);
   const [filter, setFilter] = useState<"all" | ReportType>("all");
 
@@ -433,6 +434,19 @@ function ReportsPage() {
               );
             })}
           </div>
+        </CardContent>
+      </Card>
+
+      {/* CTA to Next Step */}
+      <Card className="border-[color:var(--primary)]/30 bg-[color:var(--primary-soft)]/50 shadow-none mt-8">
+        <CardContent className="flex items-center justify-between gap-4 p-5">
+          <div>
+            <p className="text-sm font-semibold">Return to Dashboard</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">View overall factory performance, active products, and analytics.</p>
+          </div>
+          <Button size="sm" onClick={() => navigate({ to: "/app/dashboard" })} className="shrink-0 bg-primary text-primary-foreground hover:bg-primary/90">
+            Go to Dashboard <ChevronRight className="ml-2 h-4 w-4" />
+          </Button>
         </CardContent>
       </Card>
 

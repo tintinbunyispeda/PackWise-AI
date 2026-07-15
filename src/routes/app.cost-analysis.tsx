@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import {
   ArrowLeft, ChevronRight, Recycle, Leaf,
-  DollarSign, Clock, Sparkles, Brain, Send, CheckCircle2,
+  DollarSign, Clock, Sparkles, Brain, Send, CheckCircle2, FileText,
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -145,8 +145,8 @@ function CostSustainabilityPage() {
             <Button variant="outline" size="sm" onClick={() => navigate({ to: "/app/risk-assessment" })}>
               <ArrowLeft className="h-4 w-4" /> Back to Risk Assessment
             </Button>
-            <Button size="sm" onClick={() => navigate({ to: "/app/submit-approval" })} className="bg-[color:var(--success)] text-white hover:bg-[color:var(--success)]/90">
-              <Send className="mr-2 h-4 w-4" /> Submit Plan
+            <Button size="sm" onClick={() => navigate({ to: "/app/reports" })} className="bg-primary text-primary-foreground hover:bg-primary/90">
+              <FileText className="mr-2 h-4 w-4" /> Generate Report
             </Button>
           </>
         }
@@ -317,14 +317,14 @@ function CostSustainabilityPage() {
       </div>
 
       {/* CTA */}
-      <Card className="border-[color:var(--primary)]/30 bg-[color:var(--primary-soft)]/50 shadow-none">
+      <Card className="border-[color:var(--primary)]/30 bg-[color:var(--primary-soft)]/50 shadow-none mt-8">
         <CardContent className="flex items-center justify-between gap-4 p-5">
           <div>
-            <p className="text-sm font-semibold">Ready for Production?</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">Submit the completed analysis and attachment plan to the Operations Manager for final approval.</p>
+            <p className="text-sm font-semibold">Generate Final Report</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">Compile the analysis, attachment plan, risk assessment, and cost into a final PDF report.</p>
           </div>
-          <Button size="sm" onClick={() => navigate({ to: "/app/submit-approval" })} className="shrink-0 bg-[color:var(--success)] text-white hover:bg-[color:var(--success)]/90">
-            <Send className="mr-2 h-4 w-4" /> Submit Plan
+          <Button size="sm" onClick={() => navigate({ to: "/app/reports" })} className="shrink-0 bg-primary text-primary-foreground hover:bg-primary/90">
+            <FileText className="mr-2 h-4 w-4" /> Generate Report
           </Button>
         </CardContent>
       </Card>

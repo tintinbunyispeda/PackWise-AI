@@ -62,7 +62,7 @@ function ApprovalCard({ req }: { req: ApprovalRequest }) {
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <p className="text-base font-semibold text-foreground">{req.sku}</p>
-              <Badge variant="outline" className="text-[10px] font-medium text-muted-foreground">{req.id}</Badge>
+              <Badge variant="outline" className="text-[10px] font-medium text-muted-foreground">#{req.id.split('-')[0].toUpperCase()}</Badge>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
               Submitted by <span className="font-medium text-foreground">{req.engineer}</span> · {req.date}

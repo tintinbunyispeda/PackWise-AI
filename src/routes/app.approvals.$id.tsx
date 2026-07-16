@@ -23,6 +23,8 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
+import SubmitPlanContent from "@/components/SubmitPlanContent";
+
 // Feedback Modal Component
 function FeedbackModal({ mode, onConfirm, onCancel }: { mode: "Approved" | "Rejected", onConfirm: (fb: string) => void, onCancel: () => void }) {
   const [feedback, setFeedback] = useState("");
@@ -350,6 +352,10 @@ function buildReportBlueprintSvg(analysis: any, plan: any): string {
   `;
 }
 
+function shortId(id: string) {
+  return `#${id.split('-')[0].toUpperCase()}`;
+}
+
 function ApprovalDetailsPage() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
@@ -409,7 +415,7 @@ function ApprovalDetailsPage() {
     updateApprovalStatus(id, status, feedback || undefined);
     setModalMode(null);
     toast[status === "Approved" ? "success" : "error"](
-      `Request ${id} ${status.toLowerCase()}.`
+      `Request ${shortId(id)} ${status.toLowerCase()}.`
     );
     navigate({ to: "/app/approvals" });
   };
@@ -417,7 +423,7 @@ function ApprovalDetailsPage() {
   const onExportPdf = () => {
     if (!approvalReq) return;
     const snap = approvalReq.reportSnapshot;
-    const repId = approvalReq.id ? `REP-${approvalReq.id.slice(-4)}` : `REP-${Math.floor(Math.random() * 10000)}`;
+    const repId = approvalReq.id ? shortId(approvalReq.id) : `#${Math.floor(Math.random() * 90000) + 10000}`;
 
     const zonesHtml = (snap?.zones || []).map((z: any) => `
       <tr>
@@ -625,7 +631,7 @@ function ApprovalDetailsPage() {
     return (
       <div className="space-y-6">
         <PageHeader
-          title={`Approval Request: ${id}`}
+          title={`Approval Request: ${shortId(id)}`}
           description="Retrieving approval request details..."
           actions={
             <Button variant="outline" size="sm" asChild>
@@ -652,7 +658,7 @@ function ApprovalDetailsPage() {
         />
       )}
       <PageHeader
-        title={`Approval Request: ${id}`}
+        title={`Approval Request: ${shortId(id)}`}
         description={`Reviewing attachment plan for ${productName}`}
         actions={
           <div className="flex gap-2">
@@ -666,143 +672,9 @@ function ApprovalDetailsPage() {
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {[
-          { label: "Zones Secured",      value: `${activeZones.length} / ${zones.length}`, icon: Zap         },
-          { label: "Est. Labor / Unit",  value: `${totalLabor.toFixed(1)} min`,    icon: Clock       },
-          { label: "Avg. Pose Stability",value: `${poseStab}%`,        icon: ShieldAlert  },
-          { label: "Sustainability Score",value: `${avgSustain}/100`,    icon: Leaf        },
-        ].map(({ label, value, icon: Icon }) => (
-          <Card key={label} className="border-border/70 shadow-none">
-            <CardContent className="p-5 flex items-center gap-4">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[color:var(--primary-soft)] text-primary">
-                <Icon className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-                <p className="mt-0.5 text-xl font-bold text-foreground">{value}</p>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      {!approvalReq && (
-        <div className="rounded-xl border border-dashed border-border/70 bg-muted/10 p-8 text-center text-muted-foreground text-sm">
-          Approval request not found. It may have been cleared.
-        </div>
-      )}
-
-      {approvalReq?.status !== "Pending" && approvalReq && (
-        <Card className={`shadow-none border ${approvalReq.status === "Approved" ? "border-[color:var(--success)]/40 bg-[color:var(--success)]/5" : "border-destructive/30 bg-destructive/5"}`}>
-          <CardContent className="flex items-center gap-3 p-4">
-            {approvalReq.status === "Approved"
-              ? <CheckCircle2 className="h-5 w-5 text-[color:var(--success)] shrink-0" />
-              : <XCircle className="h-5 w-5 text-destructive shrink-0" />}
-            <div>
-              <p className="text-sm font-semibold">This plan was {approvalReq.status}</p>
-              {approvalReq.decidedAt && <p className="text-xs text-muted-foreground">Decided at {approvalReq.decidedAt}</p>}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <div className="grid gap-6 lg:grid-cols-5">
-        <Card className="border-border/70 shadow-none lg:col-span-2">
-          <CardHeader>
-            <CardTitle className="text-base">Product Image & Detections</CardTitle>
-            <CardDescription>Visual evidence from CV and AI processing</CardDescription>
-          </CardHeader>
-          <CardContent className="relative flex flex-col items-center justify-center overflow-hidden rounded-xl bg-zinc-950/5 p-4" style={{ minHeight: 380 }}>
-            {imageUrl ? (
-              <YoloImageOverlay imageUrl={imageUrl} detections={analysis?.cvDetections || []} threshold={0.15} />
-            ) : (
-              <div className="text-muted-foreground text-sm flex flex-col items-center gap-2">
-                <ImageIcon className="h-8 w-8 opacity-20" />
-                No image data available
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <div className="space-y-4 lg:col-span-3">
-          <Card className="border-border/70 shadow-none">
-            <CardHeader>
-              <CardTitle className="text-base">Zone Inspector</CardTitle>
-              <CardDescription>Select a zone to view attachment details, risk level, and cost impact</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {zones.length === 0 ? (
-                <div className="flex flex-col items-center justify-center p-8 text-center border rounded-lg border-dashed bg-muted/10">
-                  <Info className="h-8 w-8 text-muted-foreground mb-3 opacity-50" />
-                  <p className="text-sm font-medium">No Attachment Zones</p>
-                  <p className="text-xs text-muted-foreground mt-1">Neither AI nor CV detected any required attachment zones for this product.</p>
-                </div>
-              ) : (
-                zones.map((z: any, i: number) => (
-                <button
-                  key={z.zone}
-                  onClick={() => setSelected(z.zone)}
-                  className={`w-full flex items-center gap-3 rounded-lg border px-4 py-3 text-left transition ${selected === z.zone ? "border-primary bg-[color:var(--primary-soft)]/40" : "border-border/60 hover:border-primary/30 hover:bg-muted/30"}`}
-                >
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white" style={{ background: RISK_FILL[z.riskLevel] }}>
-                    {i + 1}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold">{z.zone}</span>
-                      <Badge variant="outline" className={`text-[10px] font-medium capitalize ${RISK_BADGE[z.riskLevel]}`}>{z.riskLevel} risk</Badge>
-                    </div>
-                    <span className="text-xs text-muted-foreground">{z.bodyRegion}</span>
-                  </div>
-                  <span className="shrink-0 text-sm font-medium text-foreground">{z.recommendedMethod}</span>
-                </button>
-              )))}
-            </CardContent>
-          </Card>
-
-          {sel && (
-            <Card className="border-[color:var(--primary)]/20 bg-[color:var(--primary-soft)]/20 shadow-none">
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-white text-xs font-bold" style={{ background: RISK_FILL[sel.riskLevel] }}>
-                    {zones.indexOf(sel) + 1}
-                  </div>
-                  <CardTitle className="text-base">{sel.zone}</CardTitle>
-                  <Badge variant="outline" className={`text-[10px] font-medium capitalize ${RISK_BADGE[sel.riskLevel]}`}>{sel.riskLevel} risk</Badge>
-                </div>
-                <CardDescription>{sel.bodyRegion}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-3 gap-4 mb-4">
-                  <div className="rounded-lg bg-background border border-border/60 p-3 text-center">
-                    <DollarSign className="mx-auto h-4 w-4 text-muted-foreground mb-1" />
-                    <p className="text-xs text-muted-foreground">Cost / Unit</p>
-                    <p className="text-lg font-bold">{sel.cost ?? "$0.00"}</p>
-                  </div>
-                  <div className="rounded-lg bg-background border border-border/60 p-3 text-center">
-                    <Clock className="mx-auto h-4 w-4 text-muted-foreground mb-1" />
-                    <p className="text-xs text-muted-foreground">Labor</p>
-                    <p className="text-lg font-bold">{sel.labor ?? "0 min"}</p>
-                  </div>
-                  <div className="rounded-lg bg-background border border-border/60 p-3 text-center">
-                    <Leaf className="mx-auto h-4 w-4 text-muted-foreground mb-1" />
-                    <p className="text-xs text-muted-foreground">Sustainability</p>
-                    <p className="text-lg font-bold">{sel.sustainability ?? 100}</p>
-                  </div>
-                </div>
-                <div className="rounded-lg border border-border/60 bg-background p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">Recommended Method</p>
-                  <p className="text-sm font-medium text-foreground">{sel.recommendedMethod}</p>
-                  <div className="mt-2 flex items-start gap-2">
-                    <Info className="h-3.5 w-3.5 shrink-0 text-primary mt-0.5" />
-                    <p className="text-xs text-muted-foreground">{sel.impact ?? "Attachment recommended based on stability analysis"}</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
+      {/* SubmitPlanContent Render (Looks exactly like PE) */}
+      <div className="mt-8 border-t border-border/70 pt-8">
+        <SubmitPlanContent snapshot={{ ...approvalReq?.reportSnapshot, id, sku: approvalReq?.sku }} hideActions={true} />
       </div>
 
       {/* Decision panel — only show if still Pending */}

@@ -48,13 +48,13 @@ const NAV: Record<Role, Item[]> = {
   ],
   manager: [
     { title: "Dashboard",            url: "/app/dashboard",   icon: LayoutDashboard },
-    { title: "Pending Approvals",    url: "/app/approvals",   icon: CheckSquare     },
+    { title: "Pending Report Approvals",    url: "/app/approvals",   icon: CheckSquare     },
     { title: "Reports",              url: "/app/reports",      icon: FileBarChart2  },
     { title: "Settings",             url: "/app/settings",     icon: Settings       },
   ],
   admin: [
     { title: "Dashboard",             url: "/app/dashboard",           icon: LayoutDashboard },
-    { title: "Pending Approvals",     url: "/app/approvals",           icon: CheckSquare     },
+    { title: "Pending Report Approvals",     url: "/app/approvals",           icon: CheckSquare     },
     { title: "Reports",               url: "/app/reports",             icon: FileBarChart2   },
     { title: "User Management",       url: "/app/users",               icon: Users           },
     { title: "Settings",              url: "/app/settings",            icon: Settings        },

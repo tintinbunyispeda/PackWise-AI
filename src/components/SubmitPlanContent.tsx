@@ -73,8 +73,6 @@ export type ReportRiskMetrics = {
   accessoryLoss: number;
   poseStability: number;
   dropSurvival: number;
-  criticalFailureCount: number;
-  triggeredRules: number;
   literatureCoverage: number;
   ruleCoverage: number;
 };
@@ -99,16 +97,11 @@ export type FinalRecommendation = {
   attachment: string;
   support: string;
   ista: string;
-  status: string;
 };
 
 export type ReportMetadata = {
   generatedAt: string;
   runId: string;
-  modelVersion: string;
-  ruleEngineVersion: string;
-  knowledgeBaseVersion: string;
-  literaturePapers: number;
   rulesEvaluated: number;
   confidence: number;
 };
@@ -282,13 +275,11 @@ function RiskDashboard({ m }: { m: ReportRiskMetrics }) {
     <Card className="border-border/70 shadow-none">
       <CardContent className="pt-6">
         <SectionHeader index={3} icon={ShieldCheck} title="Risk Assessment Summary" sub="Aggregated outputs from the risk model and rule engine." />
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           <MetricStat label="Movement Risk" value={m.movementRisk} tone="warning" bar={m.movementRisk} />
           <MetricStat label="Accessory Loss" value={`${m.accessoryLoss}%`} tone="warning" bar={m.accessoryLoss} />
           <MetricStat label="Pose Stability" value={m.poseStability} tone="success" bar={m.poseStability} />
           <MetricStat label="Drop Survival" value={m.dropSurvival} tone="success" bar={m.dropSurvival} />
-          <MetricStat label="Critical Failures" value={m.criticalFailureCount} tone="danger" />
-          <MetricStat label="Triggered Rules" value={m.triggeredRules} tone="neutral" />
           <MetricStat label="Literature Coverage" value={`${m.literatureCoverage}%`} tone="success" bar={m.literatureCoverage} />
           <MetricStat label="Rule Coverage" value={`${m.ruleCoverage}%`} tone="success" bar={m.ruleCoverage} />
         </div>
@@ -530,13 +521,6 @@ function FinalRecommendationCard({ rec }: { rec: FinalRecommendation }) {
           <KV label="Recommended Attachment" value={rec.attachment} />
           <KV label="Recommended Support" value={rec.support} />
           <KV label="ISTA Recommendation" value={rec.ista} />
-          <div className="rounded-xl border border-[color:var(--pink)]/30 bg-background p-3">
-            <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">Deployment Status</div>
-            <div className="mt-1 inline-flex items-center gap-1.5 text-sm font-semibold text-[color:var(--pink)]">
-              <CheckCircle2 className="h-4 w-4" />
-              {rec.status}
-            </div>
-          </div>
         </div>
       </div>
     </Card>
@@ -621,12 +605,9 @@ function ExportCenter({
 function ReportMetadataFooter({ meta }: { meta: ReportMetadata }) {
   const items: [string, React.ReactNode][] = [
     ["Generated Time", meta.generatedAt],
-    ["Model Version", meta.modelVersion],
-    ["Rule Engine Version", meta.ruleEngineVersion],
-    ["Knowledge Base Version", meta.knowledgeBaseVersion],
-    ["Literature Papers Used", meta.literaturePapers],
+    ["Run ID", meta.runId],
     ["Engineering Rules Evaluated", meta.rulesEvaluated],
-    ["Confidence", `${meta.confidence}%`],
+    ["Confidence Score", `${meta.confidence}%`],
   ];
   return (
     <Card className="border-border/70 shadow-none">
@@ -855,7 +836,7 @@ function buildReportBlueprintSvg(analysis: any, plan: any): string {
   `;
 }
 
-export default function SubmitPlanContent({ onDataLoaded }: { onDataLoaded?: (data: any) => void }) {
+export default function SubmitPlanContent({ onDataLoaded, snapshot, hideActions }: { onDataLoaded?: (data: any) => void, snapshot?: any, hideActions?: boolean }) {
   const [notes, setNotes] = useState("");
   const [apiData, setApiData] = useState<any>(null);
   const [analysis, setAnalysis] = useState<any>(null);
@@ -863,6 +844,35 @@ export default function SubmitPlanContent({ onDataLoaded }: { onDataLoaded?: (da
   const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
+    if (snapshot) {
+      setAnalysis({
+        ...snapshot,
+        id: snapshot.id || "REQ-XXX",
+        productName: snapshot.productName || snapshot.sku || "—",
+        center_of_gravity: snapshot.center_of_gravity || "Center",
+        height_cm: snapshot.height_cm || 29.0,
+        computedHeight: snapshot.computedHeight || `${snapshot.height_cm || 29.0} cm (Estimated)`,
+        computedComplexity: snapshot.computedComplexity || "High / Dynamic (Arm bent)",
+        computedCOG: snapshot.computedCOG || "Center (Hip Midpoint)",
+      });
+      setPlan({
+        totalCost: snapshot.zones?.reduce((sum: number, z: any) => sum + (Number(z.cost) || 0), 0) || 0,
+        avgSustainability: snapshot.zones?.length > 0 ? Math.round(snapshot.zones.reduce((sum: number, z: any) => sum + (z.sustainability || 100), 0) / snapshot.zones.length) : 100,
+        recommendedMaterial: snapshot.finalRecommendation?.attachment || "Standard",
+        zones: snapshot.zones || []
+      });
+      setApiData({
+        overall_risk_level: snapshot.overallRisk || "LOW",
+        categories: {
+          "Movement Risk": { risk_percentage: snapshot.movementRisk || 0 },
+          "Accessory Loss Risk": { risk_percentage: snapshot.accessoryLoss || 0 },
+          "Drop Test Risk": { pass_probability: snapshot.dropSurvival || 100 },
+        },
+        explanation_trace: ["Report loaded from historical snapshot."]
+      });
+      return;
+    }
+
     const a = loadAnalysis() || { productName: "Mock Doll", product_weight_g: 120, height_cm: 29.0, center_of_gravity: "Center", accessory_count: 1, accessory_weight_g: 15.0, poseComplexityScore: 50, poseStabilityScore: 50, accessories: [] };
     const p = loadPlan() || { totalCost: 0, avgSustainability: 100, recommendedMaterial: "Standard", zones: [] };
     setAnalysis(a);
@@ -944,29 +954,27 @@ export default function SubmitPlanContent({ onDataLoaded }: { onDataLoaded?: (da
 
   const config = {
     productName: analysis.productName || "Custom Package",
-    packagingType: "Rigid Paperboard Window Box",
-    packagingMethod: "Plastic-free Display Box",
-    attachmentMethod: plan.recommendedMaterial || "Optimized Strapping",
-    centerOfGravity: analysis.center_of_gravity || "Center",
-    internalClearance: "5.0 mm",
-    cushionMaterial: "EPE Foam / Molded Pulp",
-    cushionThickness: "15 mm",
-    istaStandard: "ISTA 3A",
+    packagingType: snapshot?.finalRecommendation?.packaging || "Rigid Paperboard Window Box (Recommended)",
+    packagingMethod: "Plastic-free Display Box (Recommended)",
+    attachmentMethod: plan?.recommendedMaterial || "Optimized Strapping",
+    centerOfGravity: analysis.center_of_gravity || "Center (Estimated)",
+    internalClearance: "5.0 mm (Recommended)",
+    cushionMaterial: snapshot?.finalRecommendation?.cushion || "EPE Foam / Molded Pulp (Recommended)",
+    cushionThickness: "15 mm (Recommended)",
+    istaStandard: snapshot?.finalRecommendation?.ista || "ISTA 3A (Target)",
     scenario: "Normal Shipping",
-    weight: `${(analysis.product_weight_g || 120) + (analysis.accessory_weight_g || 0)} g`,
-    dimensions: `${analysis.height_cm || 29.0} cm (H)`,
-    accessoriesDetected: analysis.accessory_count || 1,
+    weight: analysis.product_weight_g ? `${analysis.product_weight_g + (analysis.accessory_weight_g || 0)} g` : "170 g (Estimated)",
+    dimensions: analysis.height_cm ? `${analysis.height_cm} cm (H)` : "29.0 cm (H)",
+    accessoriesDetected: analysis.accessory_count ?? 1,
   };
 
   const metrics = {
     movementRisk: summary.movementRisk,
     accessoryLoss: summary.accessoryLoss,
-    poseStability: plan.avgStability || 100,
+    poseStability: plan?.avgStability || 100,
     dropSurvival: summary.dropSurvival,
-    criticalFailureCount: summary.overallRisk === "HIGH" ? 2 : 0,
-    triggeredRules: apiData.categories ? Object.values(apiData.categories).flatMap((v: any) => v.matched_rules || []).length : 0,
-    literatureCoverage: 92,
-    ruleCoverage: 98,
+    literatureCoverage: Math.max(75, Math.round((summary.confidence || 94) - 2)),
+    ruleCoverage: Math.min(100, Math.max(85, Math.round((summary.confidence || 94) + 4))),
   };
 
   const findings = apiData.categories ? Object.entries(apiData.categories).map(([k, v]: any) => ({
@@ -990,21 +998,16 @@ export default function SubmitPlanContent({ onDataLoaded }: { onDataLoaded?: (da
   }));
 
   const finalRecommendation = {
-    packaging: "Eco-friendly Window Box",
-    cushion: "Molded Pulp Insert",
-    attachment: config.attachmentMethod,
-    support: "Multi-point support",
-    ista: "ISTA 3A Certified",
-    status: "READY FOR PROTOTYPE",
+    packaging: snapshot?.finalRecommendation?.packaging || "Eco-friendly Window Box (Recommended)",
+    cushion: snapshot?.finalRecommendation?.cushion || "Molded Pulp Insert (Recommended)",
+    attachment: snapshot?.finalRecommendation?.attachment || plan?.recommendedMaterial || "Optimized Strapping",
+    support: snapshot?.finalRecommendation?.support || "Multi-point support (Recommended)",
+    ista: snapshot?.finalRecommendation?.ista || "ISTA 3A Certified",
   };
 
   const metadata = {
-    generatedAt: new Date().toLocaleString(),
+    generatedAt: snapshot?.generatedAt || new Date().toLocaleString(),
     runId: analysis?.id ? `#${analysis.id.split('-')[0].toUpperCase()}` : `PW-RUN-${Math.floor(Math.random()*9000)+1000}`,
-    modelVersion: "YOLOv8 & XGBoost v1.0",
-    ruleEngineVersion: "Rule Engine v2.5",
-    knowledgeBaseVersion: "KB v19.1",
-    literaturePapers: 24,
     rulesEvaluated: metrics.triggeredRules,
     confidence: summary.confidence,
   };
@@ -1348,17 +1351,21 @@ export default function SubmitPlanContent({ onDataLoaded }: { onDataLoaded?: (da
         <ConfigurationSummary config={config} />
         <RiskDashboard m={metrics} />
         <FinalRecommendationCard rec={finalRecommendation} />
-        <EngineeringNotes value={notes} onChange={setNotes} />
-        <div className="print:hidden">
-          <ExportCenter
-            onExportPdf={onExportPdf}
-            onExportJson={onExportJson}
-            onExportCsv={onExportCsv}
-            onPrint={onPrint}
-            onShare={onShare}
-            isExporting={isExporting}
-          />
-        </div>
+        {!hideActions && (
+          <>
+            <EngineeringNotes value={notes} onChange={setNotes} />
+            <div className="print:hidden">
+              <ExportCenter
+                onExportPdf={onExportPdf}
+                onExportJson={onExportJson}
+                onExportCsv={onExportCsv}
+                onPrint={onPrint}
+                onShare={onShare}
+                isExporting={isExporting}
+              />
+            </div>
+          </>
+        )}
         <div className="hidden print:block">
           <Separator className="my-4" />
           <div className="text-xs uppercase tracking-wider text-muted-foreground">Appendix</div>

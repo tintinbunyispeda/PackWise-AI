@@ -99,11 +99,11 @@ function SubmitApprovalPage() {
         sustainability: z.sustainability || 100,
       })),
       finalRecommendation: {
-        packaging: "Eco-friendly Window Box",
-        cushion: "Molded Pulp Insert",
+        packaging: "—",
+        cushion: "—",
         attachment: plan?.recommendedMaterial || "Optimized Strapping",
-        support: "Multi-point support",
-        ista: "ISTA 3A Certified",
+        support: "—",
+        ista: "—",
       },
       imageDataUrl,
       annotatedImageDataUrl,
@@ -115,6 +115,14 @@ function SubmitApprovalPage() {
       hair_length: analysis?.hair_length || "Short",
       selected_accessories: analysis?.selected_accessories || [],
       pose: analysis?.pose || "Arms Open",
+      center_of_gravity: analysis?.center_of_gravity,
+      height_cm: analysis?.height_cm,
+      computedHeight: analysis?.computedHeight,
+      computedComplexity: analysis?.computedComplexity,
+      computedCOG: analysis?.computedCOG,
+      productName: analysis?.productName,
+      triggeredRules: apiData?.categories ? Object.values(apiData.categories).flatMap((v: any) => v.matched_rules || []).length : 0,
+      criticalFailureCount: finalRiskLevel.toUpperCase() === "HIGH" ? 2 : 0,
     };
 
     // 1. Save to localStorage (for offline/fast access)

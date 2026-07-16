@@ -35,6 +35,7 @@ import { type ApprovalRequest } from "@/lib/workflow-store";
 import { supabase } from "@/lib/supabase";
 import { recommendPose } from "@/lib/pose-recommendation";
 import { PoseBlueprint } from "@/components/pose-blueprint";
+import { getUser } from "@/lib/auth";
 
 export const Route = createFileRoute("/app/reports")({
   head: () => ({ meta: [{ title: "Reports — PackWise AI" }] }),
@@ -49,7 +50,7 @@ interface DerivedReport {
   product: string;
   engineer: string;
   date: string;
-  status: "Approved" | "Rejected";
+  status: "Approved" | "Rejected" | "Pending";
   decidedAt?: string;
   risk: string;
   cost: string;
@@ -611,17 +612,19 @@ function ReportDetailModal({ report, onClose }: { report: DerivedReport; onClose
 }
 
 function ReportsPage() {
+  const user = getUser();
+  const isPE = user?.role === "engineer";
+
   const [reports, setReports] = useState<DerivedReport[]>([]);
   const [selected, setSelected] = useState<DerivedReport | null>(null);
-  const [tab, setTab] = useState<"approved" | "rejected">("approved");
+  const [tab, setTab] = useState<"approved" | "rejected" | "pending">("approved");
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     async function fetchData() {
       const { data } = await supabase
         .from('approval_requests')
-        .select('*')
-        .in('status', ['Approved', 'Rejected']);
+        .select('*');
       
       if (data) {
         setReports(data.map(toReport));
@@ -633,7 +636,8 @@ function ReportsPage() {
 
   const approved = reports.filter((r) => r.status === "Approved");
   const rejected = reports.filter((r) => r.status === "Rejected");
-  const displayed = tab === "approved" ? approved : rejected;
+  const pending = reports.filter((r) => r.status === "Pending");
+  const displayed = tab === "approved" ? approved : tab === "rejected" ? rejected : pending;
 
   return (
     <div className="space-y-8">
@@ -648,6 +652,11 @@ function ReportsPage() {
             <Badge variant="outline" className="border-border/70 font-normal text-destructive">
               <XCircle className="mr-1 h-3 w-3" /> {rejected.length} rejected
             </Badge>
+            {isPE && (
+              <Badge variant="outline" className="border-border/70 font-normal text-amber-500">
+                <Clock className="mr-1 h-3 w-3" /> {pending.length} pending
+              </Badge>
+            )}
           </div>
         }
       />
@@ -675,17 +684,19 @@ function ReportsPage() {
 
       {/* Tabs */}
       <div className="flex gap-2 border-b border-border/70">
-        {(["approved", "rejected"] as const).map((t) => (
+        {(["approved", "rejected", ...(isPE ? ["pending"] : [])] as const).map((t) => (
           <button
             key={t}
-            onClick={() => setTab(t)}
+            onClick={() => setTab(t as "approved" | "rejected" | "pending")}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px flex items-center gap-1.5 ${
               tab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
             }`}
           >
             {t === "approved"
               ? <><CheckCircle2 className="h-3.5 w-3.5" /> Approved Reports</>
-              : <><XCircle className="h-3.5 w-3.5" /> Rejected Plans</>}
+              : t === "rejected"
+              ? <><XCircle className="h-3.5 w-3.5" /> Rejected Plans</>
+              : <><Clock className="h-3.5 w-3.5" /> Pending Plans</>}
           </button>
         ))}
       </div>

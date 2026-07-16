@@ -127,8 +127,22 @@ function CostSustainabilityPage() {
   const avgStability = plan?.avgStability ?? 88;
   const totalLabor = plan?.totalLaborMins ?? activeZones.reduce((s, z) => s + z.laborMins, 0);
 
-  // Cost savings from removed zones
-  const costSavings = removedZones.reduce((s, z) => s + z.cost, 0);
+  // Calculate cost savings vs industry standard (e.g., standard plastic ties/blisters at ~$0.15 per attachment)
+  const standardCostPerUnit = 0.15;
+  const standardTotalCost = activeZones.reduce((s, z) => s + ((z.quantity ?? 1) * standardCostPerUnit), 0);
+  
+  // Calculate cost of items that the AI explicitly removed
+  const removedCost = removedZones.reduce((s, z) => {
+    let qty = 1;
+    const match = z.currentMethod.match(/\((\d+)x\)/);
+    if (match) qty = parseInt(match[1], 10);
+    return s + (qty * standardCostPerUnit);
+  }, 0);
+
+  const costSavings = Math.max(0, (standardTotalCost - totalCost) + removedCost);
+  const savingsSubtext = removedZones.length > 0 
+    ? `${removedZones.length} zone(s) removed + material optimization` 
+    : "Material optimization vs standard packaging";
 
 
 
@@ -160,7 +174,7 @@ function CostSustainabilityPage() {
         {[
           { label: "Total Cost / Unit",    value: `$${totalCost.toFixed(2)}`,   sub: `${activeZones.length} attachment zones`, icon: DollarSign,  color: "text-primary" },
           { label: "Est. Labor / Unit",    value: `${totalLabor.toFixed(1)} min`, sub: "Production line estimate", icon: Clock,      color: "text-[color:var(--chart-2)]" },
-          { label: "Cost Savings",         value: costSavings > 0 ? `-$${costSavings.toFixed(2)}` : "$0.00",   sub: removedZones.length > 0 ? `${removedZones.length} zone(s) removed by AI` : "No zones removed", icon: Sparkles, color: "text-[color:var(--success)]" },
+          { label: "Cost Savings",         value: costSavings > 0 ? `$${costSavings.toFixed(2)}` : "$0.00",   sub: savingsSubtext, icon: Sparkles, color: "text-[color:var(--success)]" },
           { label: "Sustainability Score", value: `${avgSustainability}/100`, sub: plan?.recommendedMaterial ? `Material: ${plan.recommendedMaterial}` : "Weighted average",   icon: Leaf,       color: "text-[color:var(--success)]" },
         ].map(({ label, value, sub, icon: Icon, color }) => (
           <Card key={label} className="border-border/70 shadow-none">

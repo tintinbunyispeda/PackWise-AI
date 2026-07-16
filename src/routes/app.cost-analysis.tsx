@@ -4,10 +4,7 @@ import {
   ArrowLeft, ChevronRight, Leaf,
   DollarSign, Clock, Sparkles, Brain, Send, FileText,
 } from "lucide-react";
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend,
-} from "recharts";
+
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +14,7 @@ import {
 } from "@/components/ui/table";
 import { PageHeader } from "@/components/page-header";
 import { loadAnalysis, loadPlan, DEMO_RESULT, type PlanResult, type PlanZoneRow } from "@/lib/workflow-store";
+import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import { getUser } from "@/lib/auth";
 
@@ -58,30 +56,9 @@ const WORKFLOW_STEPS = [
   { label: "Cost & Sustainability", active: true },
 ];
 
-// Sustainability score per material
-const MATERIAL_SUSTAINABILITY: Record<string, number> = {
-  "Elastic Strap": 68,
-  "PET Support": 78,
-  "EVA Strap": 82,
-  "Cardboard Support": 90,
-  "No Attachment Required": 100,
-};
+// Material colors for charts (UI only)
 
-const MATERIAL_COSTS: Record<string, number> = {
-  "Elastic Strap": 0.08,
-  "PET Support": 0.18,
-  "EVA Strap": 0.12,
-  "Cardboard Support": 0.15,
-  "No Attachment Required": 0.00,
-};
 
-const MATERIAL_COLORS: Record<string, string> = {
-  "Elastic Strap": "var(--color-chart-1)",
-  "PET Support": "var(--color-chart-2)",
-  "EVA Strap": "var(--color-chart-3)",
-  "Cardboard Support": "var(--color-chart-4)",
-  "No Attachment Required": "var(--color-chart-5)",
-};
 
 function WorkflowBar() {
   return (
@@ -110,6 +87,7 @@ function CostSustainabilityPage() {
   const [analysisId, setAnalysisId] = useState("");
   const [productName, setProductName] = useState("");
   const [plan, setPlan] = useState<PlanResult | null>(null);
+  const [methodProps, setMethodProps] = useState<Record<string, any>>({});
   const [ready, setReady] = useState(false);
   const [hasActiveSession, setHasActiveSession] = useState(true);
 
@@ -132,7 +110,21 @@ function CostSustainabilityPage() {
 
     setProductName(analysis.productName);
     setPlan(p);
-    setReady(true);
+    
+    // Fetch dynamic attachment methods from Supabase
+    supabase.from('attachment_methods').select('*').then(({ data, error }) => {
+      if (data && !error) {
+        const props: Record<string, any> = {};
+        data.forEach(d => {
+          props[d.name] = {
+            cost: Number(d.cost_per_gram) || 0,
+            sustainability: d.sustainability_score || 0,
+          };
+        });
+        setMethodProps(props);
+      }
+      setReady(true);
+    });
   }, []);
 
   if (!ready) return null;
@@ -188,31 +180,7 @@ function CostSustainabilityPage() {
   // Cost savings from removed zones
   const costSavings = removedZones.reduce((s, z) => s + z.cost, 0);
 
-  // Material breakdown for pie chart (from active zones only)
-  const materialCounts: Record<string, { count: number; totalCost: number }> = {};
-  for (const z of activeZones) {
-    const m = z.recommendedMethod;
-    const baseM = m.split(" (")[0];
-    if (baseM === "Not needed" || baseM === "No Attachment Required") continue;
-    const qty = z.quantity ?? 1;
-    if (!materialCounts[baseM]) materialCounts[baseM] = { count: 0, totalCost: 0 };
-    materialCounts[baseM].count += qty;
-    materialCounts[baseM].totalCost += z.cost;
-  }
-  const pieData = Object.entries(materialCounts).map(([name, d]) => ({
-    name,
-    value: d.count,
-    cost: d.totalCost,
-    color: MATERIAL_COLORS[name] ?? "var(--color-chart-5)",
-  }));
 
-  // Bar chart data: per-zone cost comparison
-  const barData = (plan?.zones ?? []).filter(z => z.action !== "Remove").map(z => ({
-    zone: z.zone,
-    cost: z.cost,
-    sustainability: MATERIAL_SUSTAINABILITY[z.recommendedMethod] ?? 80,
-    stability: z.stability,
-  }));
 
   return (
     <div className="space-y-6">
@@ -291,7 +259,7 @@ function CostSustainabilityPage() {
                 const materialName = z.action === "Remove" ? z.currentMethod : z.recommendedMethod;
                 // Strip counts from string (e.g. "Elastic Strap (2x)" -> "Elastic Strap")
                 const baseMaterial = materialName.split(" (")[0];
-                const unitCost = MATERIAL_COSTS[baseMaterial] || 0;
+                const unitCost = methodProps[baseMaterial]?.cost || 0;
 
                 return (
                   <TableRow key={z.zone} className={
@@ -351,70 +319,6 @@ function CostSustainabilityPage() {
         </CardContent>
       </Card>
 
-      {/* Charts Row */}
-      <div className="grid gap-6 lg:grid-cols-5">
-        {/* Per-zone cost bar chart */}
-        <Card className="border-border/70 shadow-none lg:col-span-3">
-          <CardHeader>
-            <CardTitle className="text-base">Cost & Sustainability per Zone</CardTitle>
-            <CardDescription>Cost and sustainability score for each recommended attachment zone</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="h-56">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={barData} margin={{ top: 4, right: 12, left: -16, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
-                  <XAxis dataKey="zone" stroke="var(--color-muted-foreground)" fontSize={10} tickLine={false} axisLine={false} />
-                  <YAxis stroke="var(--color-muted-foreground)" fontSize={11} tickLine={false} axisLine={false} />
-                  <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid var(--color-border)", background: "var(--color-card)", fontSize: 12 }} />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Bar dataKey="sustainability" name="Sustainability" fill="var(--color-chart-1)" radius={[3,3,0,0]} />
-                  <Bar dataKey="stability" name="Stability" fill="var(--color-chart-2)" radius={[3,3,0,0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Material distribution pie */}
-        <Card className="border-border/70 shadow-none lg:col-span-2">
-          <CardHeader>
-            <CardTitle className="text-base">Material Distribution</CardTitle>
-            <CardDescription>Attachment materials used in recommended plan</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {pieData.length > 0 ? (
-              <>
-                <div className="h-44">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={52} outerRadius={76} paddingAngle={2}>
-                        {pieData.map((entry) => (
-                          <Cell key={entry.name} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip formatter={(v: number, name: string) => [`${v} zone(s)`, name]} contentStyle={{ borderRadius: 8, border: "1px solid var(--color-border)", background: "var(--color-card)", fontSize: 12 }} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-                <div className="mt-2 grid grid-cols-1 gap-1.5">
-                  {pieData.map((d) => (
-                    <div key={d.name} className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <div className="h-2 w-2 shrink-0 rounded-full" style={{ background: d.color }} />
-                        <span className="text-xs text-muted-foreground">{d.name}</span>
-                      </div>
-                      <span className="text-xs font-medium">${d.cost.toFixed(2)}</span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <p className="text-sm text-muted-foreground text-center py-8">No attachment data available. Run the Attachment Planner first.</p>
-            )}
-          </CardContent>
-        </Card>
-      </div>
 
       {/* CTA */}
       <Card className="border-[color:var(--primary)]/30 bg-[color:var(--primary-soft)]/50 shadow-none mt-8">

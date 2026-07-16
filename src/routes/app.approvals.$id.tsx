@@ -154,7 +154,7 @@ function ApprovalDetailsPage() {
   const [approvalReq, setApprovalReq] = useState<any | null>(null);
   const [modalMode, setModalMode] = useState<"Approved" | "Rejected" | null>(null);
   const user = getUser();
-  const isApprover = user?.role === "manager" || user?.role === "admin";
+  const isApprover = user?.role === "manager";
 
   useEffect(() => {
     async function fetchData() {

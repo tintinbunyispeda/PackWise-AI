@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/table";
 import { PageHeader } from "@/components/page-header";
 import { loadAnalysis, loadPlan, DEMO_RESULT, type PlanResult, type PlanZoneRow } from "@/lib/workflow-store";
+import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import { getUser } from "@/lib/auth";
 
@@ -58,22 +59,7 @@ const WORKFLOW_STEPS = [
   { label: "Cost & Sustainability", active: true },
 ];
 
-// Sustainability score per material
-const MATERIAL_SUSTAINABILITY: Record<string, number> = {
-  "Elastic Strap": 68,
-  "PET Support": 78,
-  "EVA Strap": 82,
-  "Cardboard Support": 90,
-  "No Attachment Required": 100,
-};
-
-const MATERIAL_COSTS: Record<string, number> = {
-  "Elastic Strap": 0.08,
-  "PET Support": 0.18,
-  "EVA Strap": 0.12,
-  "Cardboard Support": 0.15,
-  "No Attachment Required": 0.00,
-};
+// Material colors for charts (UI only)
 
 const MATERIAL_COLORS: Record<string, string> = {
   "Elastic Strap": "var(--color-chart-1)",
@@ -110,6 +96,7 @@ function CostSustainabilityPage() {
   const [analysisId, setAnalysisId] = useState("");
   const [productName, setProductName] = useState("");
   const [plan, setPlan] = useState<PlanResult | null>(null);
+  const [methodProps, setMethodProps] = useState<Record<string, any>>({});
   const [ready, setReady] = useState(false);
   const [hasActiveSession, setHasActiveSession] = useState(true);
 
@@ -132,7 +119,21 @@ function CostSustainabilityPage() {
 
     setProductName(analysis.productName);
     setPlan(p);
-    setReady(true);
+    
+    // Fetch dynamic attachment methods from Supabase
+    supabase.from('attachment_methods').select('*').then(({ data, error }) => {
+      if (data && !error) {
+        const props: Record<string, any> = {};
+        data.forEach(d => {
+          props[d.name] = {
+            cost: Number(d.cost_per_gram) || 0,
+            sustainability: d.sustainability_score || 0,
+          };
+        });
+        setMethodProps(props);
+      }
+      setReady(true);
+    });
   }, []);
 
   if (!ready) return null;
@@ -210,7 +211,7 @@ function CostSustainabilityPage() {
   const barData = (plan?.zones ?? []).filter(z => z.action !== "Remove").map(z => ({
     zone: z.zone,
     cost: z.cost,
-    sustainability: MATERIAL_SUSTAINABILITY[z.recommendedMethod] ?? 80,
+    sustainability: methodProps[z.recommendedMethod]?.sustainability ?? 80,
     stability: z.stability,
   }));
 
@@ -291,7 +292,7 @@ function CostSustainabilityPage() {
                 const materialName = z.action === "Remove" ? z.currentMethod : z.recommendedMethod;
                 // Strip counts from string (e.g. "Elastic Strap (2x)" -> "Elastic Strap")
                 const baseMaterial = materialName.split(" (")[0];
-                const unitCost = MATERIAL_COSTS[baseMaterial] || 0;
+                const unitCost = methodProps[baseMaterial]?.cost || 0;
 
                 return (
                   <TableRow key={z.zone} className={

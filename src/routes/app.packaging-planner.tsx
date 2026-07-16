@@ -154,7 +154,7 @@ const YOLO_TO_ZONE: Record<string, { zone: string; bodyRegion: string; xgbKey: s
   "ankle_strap": { zone: "Legs/Feet", bodyRegion: "Left Leg", xgbKey: "recommended_leg_strap", defaultMethod: "Elastic Strap" },
 };
 
-function buildZonePlan(xgbData: Record<string, any>, detections: any[], threshold: number, productWeight: number = 120) {
+function buildZonePlan(xgbData: Record<string, any>, detections: any[], threshold: number, productWeight: number = 120, methodProps: Record<string, { cost: number; laborMins: number; sustainability: number; stability: number; riskReduction: number }>) {
   type PlanRow = {
     zone: string;
     currentMethod: string;      // What CV sees on the product RIGHT NOW
@@ -176,12 +176,12 @@ function buildZonePlan(xgbData: Record<string, any>, detections: any[], threshol
   const vizZones: AttachmentZone[] = [];
 
   const xgbMap: Record<string, { zone: string; bodyRegion: string; method: string }> = {
-    recommended_head_strap:  { zone: "Head/Hair",    bodyRegion: "Head / Hair",   method: "Elastic Strap"     },
-    recommended_waist_strap: { zone: "Waist",        bodyRegion: "Torso / Waist", method: "PET Support"       },
-    recommended_hand_strap:  { zone: "Hands/Wrists", bodyRegion: "Right Arm",     method: "EVA Strap"         },
-    recommended_leg_strap:   { zone: "Legs/Feet",    bodyRegion: "Left Leg",      method: "Elastic Strap"     },
-    recommended_back_support:{ zone: "Back",         bodyRegion: "Back",          method: "Cardboard Support" },
-    recommended_base_support:{ zone: "Base",         bodyRegion: "Base",          method: "Cardboard Support" },
+    recommended_head_strap: { zone: "Head/Hair", bodyRegion: "Head / Hair", method: "Elastic Strap" },
+    recommended_waist_strap: { zone: "Waist", bodyRegion: "Torso / Waist", method: "PET Support" },
+    recommended_hand_strap: { zone: "Hands/Wrists", bodyRegion: "Right Arm", method: "EVA Strap" },
+    recommended_leg_strap: { zone: "Legs/Feet", bodyRegion: "Left Leg", method: "Elastic Strap" },
+    recommended_back_support: { zone: "Back", bodyRegion: "Back", method: "Cardboard Support" },
+    recommended_base_support: { zone: "Base", bodyRegion: "Base", method: "Cardboard Support" },
   };
 
   // Build a map of what YOLO currently sees, counting instances
@@ -202,7 +202,7 @@ function buildZonePlan(xgbData: Record<string, any>, detections: any[], threshol
   const processedZones = new Set<string>();
   for (const [key, meta] of Object.entries(xgbMap)) {
     let xgbCount = xgbData[key] ?? 0;
-    
+
     // Physical engineering override: heavy products must have structural cardboard support
     if (key === "recommended_base_support" && productWeight > 180) {
       xgbCount = Math.max(xgbCount, 1);
@@ -221,7 +221,7 @@ function buildZonePlan(xgbData: Record<string, any>, detections: any[], threshol
     const cvMethod = cvDetected ? (cvDetectedZones.get(meta.zone)?.method ?? "Unknown") : "None";
     const aiMethod = xgbRecommended ? meta.method : "None";
     const finalMethod = xgbRecommended ? meta.method : cvMethod;
-    
+
     let action: "Keep" | "Add" | "Remove" | "Replace" = "Keep";
     let reasoning = "";
     if (xgbRecommended && cvDetected) {
@@ -236,11 +236,11 @@ function buildZonePlan(xgbData: Record<string, any>, detections: any[], threshol
     }
 
     const finalQty = (action === "Remove") ? 0 : Math.max(1, xgbRecommended ? xgbCount : cvCount);
-    const p = METHOD_PROPS[finalMethod] ?? METHOD_PROPS["No Attachment Required"];
+    const p = methodProps[finalMethod] ?? methodProps["No Attachment Required"] ?? { cost: 0, laborMins: 0, sustainability: 100, stability: 100, riskReduction: 0 };
     const rowCost = p.cost * finalQty;
     const rowLabor = p.laborMins * finalQty;
     const laborLabel = rowLabor === 0 ? "None" : rowLabor < 0.7 ? "Low" : "Medium";
-    const risk: "low"|"medium"|"high" = finalMethod === "No Attachment Required" ? "low" : p.stability >= 92 ? "low" : p.stability >= 85 ? "medium" : "high";
+    const risk: "low" | "medium" | "high" = finalMethod === "No Attachment Required" ? "low" : p.stability >= 92 ? "low" : p.stability >= 85 ? "medium" : "high";
 
     plan.push({
       zone: meta.zone,
@@ -274,7 +274,7 @@ function buildZonePlan(xgbData: Record<string, any>, detections: any[], threshol
   // Add any CV-detected zones not in xgbMap (edge case)
   for (const [zone, cv] of cvDetectedZones) {
     if (!processedZones.has(zone)) {
-      const p = METHOD_PROPS[cv.method] ?? METHOD_PROPS["No Attachment Required"];
+      const p = methodProps[cv.method] ?? methodProps["No Attachment Required"] ?? { cost: 0, laborMins: 0, sustainability: 100, stability: 100, riskReduction: 0 };
       const laborLabel = p.laborMins === 0 ? "None" : p.laborMins < 0.7 ? "Low" : "Medium";
       plan.push({
         zone,
@@ -308,15 +308,15 @@ function buildZonePlan(xgbData: Record<string, any>, detections: any[], threshol
   // ─── Safety Fallback Heuristic ───
   // Enforce AI Safety Fallback: Doll must have at least one active strap to prevent shifting in package
   const activeCount = plan.filter(z => z.action !== "Remove" && z.recommendedMethod !== "Not needed" && z.recommendedMethod !== "No Attachment Required" && z.quantity > 0).length;
-  
+
   if (activeCount === 0) {
     const waistRowIdx = plan.findIndex(z => z.zone === "Waist");
-    const p = METHOD_PROPS["PET Support"];
-    
+    const p = methodProps["PET Support"] ?? { cost: 0.18, laborMins: 1.1, sustainability: 78, stability: 94, riskReduction: 81 };
+
     // Check if CV detected a waist strap originally
     const cvDetected = plan[waistRowIdx]?.cvDetected ?? false;
     const cvCount = cvDetected ? 1 : 0;
-    
+
     const fallbackRow = {
       zone: "Waist",
       currentMethod: cvDetected ? `PET Support (${cvCount}x)` : "—",
@@ -400,7 +400,7 @@ function getOrGenerateKeypoints(analysis: any): any[] {
   ];
 
   const p = (analysis?.pose || "Arms Open").toLowerCase();
-  
+
   if (p.includes("open") || p.includes("t-pose") || p.includes("wide")) {
     base[9].x = 120; base[9].y = 200;
     base[7].x = 145; base[7].y = 170;
@@ -422,13 +422,13 @@ function getOrGenerateKeypoints(analysis: any): any[] {
     base[9].x = 135; base[9].y = 230;
     base[10].x = 265; base[10].y = 230;
   }
-  
+
   return base;
 }
 
 function getPoseRationaleAndStrings(analysis: any, rec: any) {
   const p = (analysis?.pose || "Arms Open").toLowerCase();
-  
+
   let poseRationale = "";
   let stringRationales: Record<string, string> = {
     "Head/Hair": "Holds the doll's neck/head securely against drop-test shock loads. Placed behind the crown line to prevent indentations in hair styling.",
@@ -456,6 +456,7 @@ function AttachmentPlannerPage() {
   const navigate = useNavigate();
   const [isSaving, setIsSaving] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [methodProps, setMethodProps] = useState<Record<string, any> | null>(null);
   const [zonePlan, setZonePlan] = useState<ReturnType<typeof buildZonePlan>["plan"]>([]);
   const [recommendedMaterial, setRecommendedMaterial] = useState<string | null>(null);
   const [threshold] = useState(0.15); // Fixed threshold — confidence filtering handled by backend
@@ -504,16 +505,37 @@ function AttachmentPlannerPage() {
     }
 
     fetchPredictions();
+
+    // Fetch dynamic attachment methods from Supabase
+    supabase.from('attachment_methods').select('*').then(({ data, error }) => {
+      if (data && !error && data.length > 0) {
+        const props: Record<string, any> = {};
+        data.forEach(d => {
+          props[d.name] = {
+            cost: Number(d.cost_per_gram) || 0,
+            laborMins: Number(d.labor_mins) || 0,
+            sustainability: d.sustainability_score || 0,
+            stability: d.stability_score || 0,
+            riskReduction: d.risk_reduction_score || 0
+          };
+        });
+        setMethodProps(props);
+      } else {
+        console.warn("Using fallback METHOD_PROPS due to DB fetch issue or empty table", error);
+        setMethodProps(METHOD_PROPS);
+      }
+    });
   }, []);
 
   useEffect(() => {
-    if (xgbData && analysis) {
+    if (xgbData && analysis && methodProps) {
       const detections = analysis.cvDetections ?? [];
       const { plan: newPlan, vizZones: newAttachmentZones } = buildZonePlan(
-        xgbData, 
-        detections, 
-        threshold, 
-        analysis.product_weight_g ?? 120
+        xgbData,
+        detections,
+        threshold,
+        analysis.product_weight_g ?? 120,
+        methodProps
       );
       setZonePlan(newPlan);
       saveAnalysis({ ...analysis, attachmentZones: newAttachmentZones });
@@ -634,7 +656,7 @@ function AttachmentPlannerPage() {
                     })
                     .select("id")
                     .single();
-                    
+
                   if (data) {
                     const currentPlan = loadPlan();
                     if (currentPlan) {
@@ -665,16 +687,14 @@ function AttachmentPlannerPage() {
       {/* ── Model Status Bar ── */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {/* CV YOLO Status */}
-        <div className={`flex items-center gap-3 rounded-lg border p-3 ${
-          (analysis?.cvDetections && analysis.cvDetections.length > 0)
+        <div className={`flex items-center gap-3 rounded-lg border p-3 ${(analysis?.cvDetections && analysis.cvDetections.length > 0)
             ? "border-[color:var(--success)]/40 bg-[color:var(--success)]/5"
             : "border-amber-500/40 bg-amber-500/5"
-        }`}>
-          <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-            (analysis?.cvDetections && analysis.cvDetections.length > 0)
+          }`}>
+          <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${(analysis?.cvDetections && analysis.cvDetections.length > 0)
               ? "bg-[color:var(--success)]/20 text-[color:var(--success)]"
               : "bg-amber-500/20 text-amber-500"
-          }`}>
+            }`}>
             {(analysis?.cvDetections && analysis.cvDetections.length > 0)
               ? <CheckCircle2 className="h-4 w-4" />
               : <AlertTriangle className="h-4 w-4" />}
@@ -690,23 +710,21 @@ function AttachmentPlannerPage() {
         </div>
 
         {/* XGBoost Status */}
-        <div className={`flex items-center gap-3 rounded-lg border p-3 ${
-          xgbStatus === "ok"
+        <div className={`flex items-center gap-3 rounded-lg border p-3 ${xgbStatus === "ok"
             ? "border-[color:var(--success)]/40 bg-[color:var(--success)]/5"
             : xgbStatus === "error"
-            ? "border-destructive/40 bg-destructive/5"
-            : "border-border/50 bg-muted/30"
-        }`}>
-          <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-            xgbStatus === "ok"
+              ? "border-destructive/40 bg-destructive/5"
+              : "border-border/50 bg-muted/30"
+          }`}>
+          <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${xgbStatus === "ok"
               ? "bg-[color:var(--success)]/20 text-[color:var(--success)]"
               : xgbStatus === "error"
-              ? "bg-destructive/20 text-destructive"
-              : "bg-muted text-muted-foreground"
-          }`}>
+                ? "bg-destructive/20 text-destructive"
+                : "bg-muted text-muted-foreground"
+            }`}>
             {xgbStatus === "ok" ? <CheckCircle2 className="h-4 w-4" />
               : xgbStatus === "error" ? <WifiOff className="h-4 w-4" />
-              : <Wifi className="h-4 w-4 animate-pulse" />}
+                : <Wifi className="h-4 w-4 animate-pulse" />}
           </div>
           <div className="min-w-0">
             <p className="text-xs font-semibold">XGBoost Packaging Model</p>
@@ -714,23 +732,21 @@ function AttachmentPlannerPage() {
               {xgbStatus === "ok" && xgbData
                 ? `✅ Connected — Head:${xgbData.recommended_head_strap} Waist:${xgbData.recommended_waist_strap} Hand:${xgbData.recommended_hand_strap} Leg:${xgbData.recommended_leg_strap} Back:${xgbData.recommended_back_support} Base:${xgbData.recommended_base_support}`
                 : xgbStatus === "error"
-                ? `❌ Backend offline — ${xgbError}`
-                : "⏳ Connecting to backend..."}
+                  ? `❌ Backend offline — ${xgbError}`
+                  : "⏳ Connecting to backend..."}
             </p>
           </div>
         </div>
 
         {/* Skeleton Keypoints Status */}
-        <div className={`flex items-center gap-3 rounded-lg border p-3 ${
-          (analysis?.raw_keypoints && analysis.raw_keypoints.length > 0)
+        <div className={`flex items-center gap-3 rounded-lg border p-3 ${(analysis?.raw_keypoints && analysis.raw_keypoints.length > 0)
             ? "border-[color:var(--success)]/40 bg-[color:var(--success)]/5"
             : "border-amber-500/40 bg-amber-500/5"
-        }`}>
-          <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-            (analysis?.raw_keypoints && analysis.raw_keypoints.length > 0)
+          }`}>
+          <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${(analysis?.raw_keypoints && analysis.raw_keypoints.length > 0)
               ? "bg-[color:var(--success)]/20 text-[color:var(--success)]"
               : "bg-amber-500/20 text-amber-500"
-          }`}>
+            }`}>
             {(analysis?.raw_keypoints && analysis.raw_keypoints.length > 0)
               ? <CheckCircle2 className="h-4 w-4" />
               : <AlertTriangle className="h-4 w-4" />}
@@ -765,7 +781,7 @@ function AttachmentPlannerPage() {
             </CardHeader>
 
             <CardContent className="p-0 flex-1 flex flex-col bg-zinc-950/5 relative min-h-[340px]">
-              
+
               {/* Tab 1: CV Strap Detection (Original View) */}
               <TabsContent value="scan" className="m-0 flex-1 flex flex-col">
                 <div className="flex-1 flex flex-col md:flex-row">
@@ -862,7 +878,7 @@ function AttachmentPlannerPage() {
               {/* Tab 2: AI Pose Blueprint & Retention Strings (New View) */}
               <TabsContent value="blueprint" className="m-0 flex-1 flex flex-col p-5 bg-background">
                 <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
-                  
+
                   {/* Left Column: Visualizers */}
                   <div className="xl:col-span-6 space-y-4">
                     <div className="flex items-center justify-between border-b pb-2">
@@ -870,15 +886,15 @@ function AttachmentPlannerPage() {
                         <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Skeleton Before & After</h3>
                         <p className="text-[10px] text-muted-foreground">Original (Red) vs Recommended (Pink) with retention strings</p>
                       </div>
-                      
+
                       <div className="flex bg-muted p-0.5 rounded-md h-7 items-center">
-                        <button 
+                        <button
                           onClick={() => setBlueprintViewMode("side-by-side")}
                           className={`text-[9px] px-2 py-0.5 rounded font-medium transition-all ${blueprintViewMode === "side-by-side" ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
                         >
                           Side-by-Side
                         </button>
-                        <button 
+                        <button
                           onClick={() => setBlueprintViewMode("overlay")}
                           className={`text-[9px] px-2 py-0.5 rounded font-medium transition-all ${blueprintViewMode === "overlay" ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
                         >
@@ -891,18 +907,18 @@ function AttachmentPlannerPage() {
                       blueprintViewMode === "side-by-side" ? (
                         <div className="grid grid-cols-2 gap-3 bg-slate-950/5 p-3 rounded-lg border">
                           <div className="border bg-white rounded-md overflow-hidden p-1 shadow-sm">
-                            <PoseBlueprint 
-                              recommendation={recBlueprint} 
-                              currentKeypoints={activeKeypoints} 
-                              mode="before" 
+                            <PoseBlueprint
+                              recommendation={recBlueprint}
+                              currentKeypoints={activeKeypoints}
+                              mode="before"
                               className="w-full h-auto max-h-[300px]"
                             />
                           </div>
                           <div className="border bg-white rounded-md overflow-hidden p-1 shadow-sm">
-                            <PoseBlueprint 
-                              recommendation={recBlueprint} 
-                              currentKeypoints={activeKeypoints} 
-                              mode="after" 
+                            <PoseBlueprint
+                              recommendation={recBlueprint}
+                              currentKeypoints={activeKeypoints}
+                              mode="after"
                               className="w-full h-auto max-h-[300px]"
                             />
                           </div>
@@ -910,10 +926,10 @@ function AttachmentPlannerPage() {
                       ) : (
                         <div className="flex justify-center bg-slate-950/5 p-3 rounded-lg border">
                           <div className="max-w-[320px] w-full border bg-white rounded-md overflow-hidden p-1 shadow-sm">
-                            <PoseBlueprint 
-                              recommendation={recBlueprint} 
-                              currentKeypoints={activeKeypoints} 
-                              mode="overlay" 
+                            <PoseBlueprint
+                              recommendation={recBlueprint}
+                              currentKeypoints={activeKeypoints}
+                              mode="overlay"
                               className="w-full h-auto max-h-[300px]"
                             />
                           </div>
@@ -952,7 +968,7 @@ function AttachmentPlannerPage() {
                         <div className="p-2 bg-white rounded border bg-[color:var(--pink-soft)]/20 border-[color:var(--pink)]/30">
                           <p className="text-[9px] text-[color:var(--pink)] uppercase font-semibold">Total Est. Weight</p>
                           <p className="font-bold text-[color:var(--pink)] mt-0.5">
-                            {(analysis?.product_weight_g ?? 120) + (analysis?.accessory_weight_g ?? 0)} g 
+                            {(analysis?.product_weight_g ?? 120) + (analysis?.accessory_weight_g ?? 0)} g
                             <span className="text-[9px] font-normal text-muted-foreground ml-1">
                               ({analysis?.accessory_weight_g ?? 0}g acc)
                             </span>
@@ -981,7 +997,7 @@ function AttachmentPlannerPage() {
                           const matchingZone = zonePlan.find(z => z.zone === placement.zone || (z.zone === "Hands/Wrists" && placement.zone === "Hands/Wrists"));
                           const qty = matchingZone?.quantity ?? 1;
                           const rationale = stringRationales[placement.zone] ?? "Anchor point secures this body region to prevent shifting.";
-                          
+
                           return (
                             <div key={idx} className="flex gap-3 p-2 bg-white border rounded-md shadow-sm items-start">
                               <span className="h-4 w-4 shrink-0 rounded-full flex items-center justify-center text-[10px] font-bold text-white mt-0.5" style={{ backgroundColor: placement.color }}>
@@ -1034,7 +1050,7 @@ function AttachmentPlannerPage() {
                         value={`Catalog shot, Barbie ${analysis?.product_family ?? "Fashionistas"} Doll in a ${recBlueprint?.poseName ?? "Compact Stand"} pose inside a cardboard display box, secured with transparent ${recBlueprint?.attachmentPlacements.find(p => p.zone === "Waist")?.method || "PET"} support and ${recBlueprint?.attachmentPlacements.find(p => p.zone === "Head/Hair")?.method || "Elastic"} straps${analysis?.selected_accessories && analysis.selected_accessories.length > 0 ? `, with accessories: ${analysis.selected_accessories.join(", ")}` : ""}, high detail, studio packaging photography --v 6.0`}
                       />
                       <div className="flex justify-end">
-                        <Button 
+                        <Button
                           onClick={() => {
                             setIsSimulatingImgGen(true);
                             setTimeout(() => {
@@ -1184,9 +1200,9 @@ function AttachmentPlannerPage() {
             <TableBody>
               {zonePlan.map((z) => (
                 <TableRow key={z.zone} className={
-                  z.action === "Keep"   ? "bg-[color:var(--success)]/5" :
-                  z.action === "Add"    ? "bg-blue-500/5" :
-                  z.action === "Remove" ? "bg-destructive/5" : ""
+                  z.action === "Keep" ? "bg-[color:var(--success)]/5" :
+                    z.action === "Add" ? "bg-blue-500/5" :
+                      z.action === "Remove" ? "bg-destructive/5" : ""
                 }>
                   <TableCell className="font-medium">{z.zone}</TableCell>
                   {/* Current — what YOLO sees */}
